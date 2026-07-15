@@ -172,7 +172,10 @@ func (r *ClusterAccessReconciler) reconcileClusterAccess(
 		// Log but don't fail - some resources may still be available
 		logger.V(2).Info("partial error getting server preferred resources", "error", err)
 		if apiResources == nil {
-			return ctrl.Result{}, fmt.Errorf("failed to get server preferred resources: %w", err)
+			// Target cluster has no discoverable resources; OpenAPI would also fail.
+			// Skip schema generation rather than propagating a spurious error.
+			logger.Info("target cluster has no discoverable resources, skipping schema generation", "clusterAccess", ca.Name)
+			return ctrl.Result{}, nil
 		}
 	}
 
@@ -185,6 +188,12 @@ func (r *ClusterAccessReconciler) reconcileClusterAccess(
 	// Resolve schema from target cluster
 	schemaJSON, err := resolver.Resolve(ctx, targetDiscovery.OpenAPIV3())
 	if err != nil {
+		if errors.Is(err, apischema.ErrGetOpenAPIPaths) {
+			// Target cluster does not serve OpenAPI v3 (e.g. a virtual workspace without
+			// an OpenAPI implementation). Skip schema generation without retrying.
+			logger.Info("target cluster does not serve OpenAPI, skipping schema generation", "clusterAccess", ca.Name)
+			return ctrl.Result{}, nil
+		}
 		logger.Error(err, "Failed to resolve schema", "clusterAccess", ca.Name)
 		return ctrl.Result{}, err
 	}

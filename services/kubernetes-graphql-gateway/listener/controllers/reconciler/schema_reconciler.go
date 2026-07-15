@@ -61,6 +61,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, schemaPaths []string, cfg *r
 		return fmt.Errorf("failed to create discovery client: %w", err)
 	}
 
+	// Skip schema generation entirely if the cluster has no discoverable resources.
+	// A cluster serving only permission claims (no spec.resources in its APIExport) will
+	// return (nil, err) here, and OpenAPI discovery will fail further down the pipeline.
+	if apiResources, err := discoveryClient.ServerPreferredResources(); err != nil && apiResources == nil {
+		logger.Info("cluster has no discoverable resources, skipping schema generation", "error", err)
+		return nil
+	}
+
 	// Create REST mapper for the host clusters
 	restMapper, err := r.restMapperFromConfig(cfg)
 	if err != nil {
