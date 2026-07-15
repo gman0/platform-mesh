@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"os"
 
 	pmmarketplacev1alpha1 "go.platform-mesh.io/apis/marketplace/v1alpha1"
 	pmuiv1alpha1 "go.platform-mesh.io/apis/ui/v1alpha1"
@@ -202,8 +203,11 @@ func Marketplace(provider *apiexport.Provider, cfg config.ServiceConfig) forward
 		storage.ListerFunc = func(ctx context.Context, options *internalversion.ListOptions) (runtime.Object, error) {
 			cluster := genericapirequest.ClusterFrom(ctx)
 
+			fmt.Fprintf(os.Stderr, "### pkg/storage/filter.go:202 [Marketplace.ListerFunc] called for cluster=%q\n", cluster.Name)
+
 			cl, err := provider.Get(ctx, multicluster.ClusterName(cluster.Name.String()))
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "### pkg/storage/filter.go:205 [Marketplace.ListerFunc] provider.Get failed: %v\n", err)
 				return nil, fmt.Errorf("failed to get cluster from provider: %w", err)
 			}
 
@@ -217,7 +221,13 @@ func Marketplace(provider *apiexport.Provider, cfg config.ServiceConfig) forward
 
 			var providerList pmuiv1alpha1.ProviderMetadataList
 			if err := lister.List(ctx, &providerList); err != nil {
+				fmt.Fprintf(os.Stderr, "### pkg/storage/filter.go:219 [Marketplace.ListerFunc] lister.List(providerList) failed: %v\n", err)
 				return nil, fmt.Errorf("failed to list providermetadatas: %w", err)
+			}
+
+			fmt.Fprintf(os.Stderr, "### pkg/storage/filter.go:222 [Marketplace.ListerFunc] providerList count=%d\n", len(providerList.Items))
+			for _, p := range providerList.Items {
+				fmt.Fprintf(os.Stderr, "### pkg/storage/filter.go:224 [Marketplace.ListerFunc]   provider name=%q\n", p.GetName())
 			}
 
 			var results unstructured.UnstructuredList
@@ -232,11 +242,19 @@ func Marketplace(provider *apiexport.Provider, cfg config.ServiceConfig) forward
 						cfg.ContentForLabel: provider.GetName(),
 					}),
 				}); err != nil {
+					fmt.Fprintf(os.Stderr, "### pkg/storage/filter.go:236 [Marketplace.ListerFunc] lister.List(exportList) for provider=%q failed: %v\n", provider.GetName(), err)
 					return nil, fmt.Errorf("failed to list apiexports for provider %s: %w", provider.GetName(), err)
+				}
+
+				fmt.Fprintf(os.Stderr, "### pkg/storage/filter.go:240 [Marketplace.ListerFunc] provider=%q exportList count=%d\n", provider.GetName(), len(exportList.Items))
+				for _, export := range exportList.Items {
+					fmt.Fprintf(os.Stderr, "### pkg/storage/filter.go:242 [Marketplace.ListerFunc]   export name=%q latestResourceSchemas=%d permissionClaims=%d\n",
+						export.Name, len(export.Spec.LatestResourceSchemas), len(export.Spec.PermissionClaims))
 				}
 
 				for _, export := range exportList.Items {
 					if len(export.Spec.LatestResourceSchemas) == 0 && len(export.Spec.PermissionClaims) == 0 {
+						fmt.Fprintf(os.Stderr, "### pkg/storage/filter.go:248 [Marketplace.ListerFunc] SKIP export=%q: no schemas and no claims\n", export.Name)
 						continue
 					}
 
@@ -270,8 +288,10 @@ func Marketplace(provider *apiexport.Provider, cfg config.ServiceConfig) forward
 					us := unstructured.Unstructured{Object: unstructuredEntry}
 					us.SetGroupVersionKind(pmmarketplacev1alpha1.SchemeGroupVersion.WithKind("MarketplaceEntry"))
 					results.Items = append(results.Items, us)
+					fmt.Fprintf(os.Stderr, "### pkg/storage/filter.go:285 [Marketplace.ListerFunc] ADDED entry export=%q provider=%q\n", export.Name, provider.Name)
 				}
 			}
+			fmt.Fprintf(os.Stderr, "### pkg/storage/filter.go:289 [Marketplace.ListerFunc] returning %d marketplace entries\n", len(results.Items))
 			return &results, nil
 		}
 	})

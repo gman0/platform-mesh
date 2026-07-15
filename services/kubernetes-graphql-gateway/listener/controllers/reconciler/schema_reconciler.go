@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	pmgatewayv1alpha1 "go.platform-mesh.io/apis/gateway/v1alpha1"
 	"go.platform-mesh.io/kubernetes-graphql-gateway/listener/pkg/schemahandler"
@@ -53,6 +54,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, schemaPaths []string, cfg *r
 	logger := log.FromContext(ctx)
 
 	logger.Info("Processing schema generation", "paths", schemaPaths)
+	fmt.Fprintf(os.Stderr, "### listener/controllers/reconciler/schema_reconciler.go:55 [Reconcile] called paths=%v\n", schemaPaths)
 
 	// Create discovery client for the host cluster
 	discoveryClient, err := discovery.NewDiscoveryClientForConfig(cfg)
@@ -65,6 +67,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, schemaPaths []string, cfg *r
 	// A cluster serving only permission claims (no spec.resources in its APIExport) will
 	// return (nil, err) here, and OpenAPI discovery will fail further down the pipeline.
 	if apiResources, err := discoveryClient.ServerPreferredResources(); err != nil && apiResources == nil {
+		fmt.Fprintf(os.Stderr, "### listener/controllers/reconciler/schema_reconciler.go:69 [Reconcile] SKIP: cluster has no discoverable resources paths=%v err=%v\n", schemaPaths, err)
 		logger.Info("cluster has no discoverable resources, skipping schema generation", "error", err)
 		return nil
 	}

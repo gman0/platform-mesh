@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	pmgatewayv1alpha1 "go.platform-mesh.io/apis/gateway/v1alpha1"
@@ -168,12 +169,14 @@ func (r *ClusterAccessReconciler) reconcileClusterAccess(
 
 	// Get preferred resources for categories enricher
 	apiResources, err := targetDiscovery.ServerPreferredResources()
+	fmt.Fprintf(os.Stderr, "### listener/controllers/clusteraccess/clusteraccess_controller.go:170 [reconcileClusterAccess] ServerPreferredResources clusterAccess=%q apiResourcesNil=%v err=%v\n", ca.Name, apiResources == nil, err)
 	if err != nil {
 		// Log but don't fail - some resources may still be available
 		logger.V(2).Info("partial error getting server preferred resources", "error", err)
 		if apiResources == nil {
 			// Target cluster has no discoverable resources; OpenAPI would also fail.
 			// Skip schema generation rather than propagating a spurious error.
+			fmt.Fprintf(os.Stderr, "### listener/controllers/clusteraccess/clusteraccess_controller.go:177 [reconcileClusterAccess] SKIP: no discoverable resources clusterAccess=%q\n", ca.Name)
 			logger.Info("target cluster has no discoverable resources, skipping schema generation", "clusterAccess", ca.Name)
 			return ctrl.Result{}, nil
 		}
