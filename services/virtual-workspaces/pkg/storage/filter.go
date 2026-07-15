@@ -236,7 +236,7 @@ func Marketplace(provider *apiexport.Provider, cfg config.ServiceConfig) forward
 				}
 
 				for _, export := range exportList.Items {
-					if len(export.Spec.LatestResourceSchemas) == 0 {
+					if len(export.Spec.LatestResourceSchemas) == 0 && len(export.Spec.PermissionClaims) == 0 {
 						continue
 					}
 
