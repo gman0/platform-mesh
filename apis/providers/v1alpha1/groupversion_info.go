@@ -57,6 +57,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ProviderEndpointRegistrationList{},
 		&ProviderEndpoint{},
 		&ProviderEndpointList{},
+		&ConnectorCASet{},
+		&ConnectorCASetList{},
 		&ProviderPermissions{},
 		&ProviderPermissionsList{},
 	)
