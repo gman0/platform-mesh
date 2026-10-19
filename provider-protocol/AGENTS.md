@@ -17,6 +17,7 @@
 - `bundle`: the strict Pinned Bundle parser, its `etag`, and Connector Certificate checks against it.
 - `innertls`: `tls.Config`s of the Inner TLS: Server Keys, key pinning, Connector Certificate verification.
 - `wsconn`: a `net.Conn` over WebSocket binary messages, with the protocol's framing; the dialer and upgrader settings.
+- `testvectors`: the shared test vectors and certificate factory, for both sides' tests.
 - `internal/testcerts`: CAs and Connector Certificates for tests.
 
 ## Commands
