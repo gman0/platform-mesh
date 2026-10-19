@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -57,14 +58,21 @@ func newInnerConn(conn *tls.Conn) *innerConn {
 	return &innerConn{conn: conn, r: bufio.NewReader(conn)}
 }
 
-// read reads the next request, with its body bounded by
-// connectionsv1.MaxBodySize.
+// errBody is returned for a request body without a length, or beyond
+// connectionsv1.MaxBodySize. The caller closes the connection.
+var errBody = errors.New("request body without length or too large")
+
+// read reads the next request. Its body must have a known length within
+// connectionsv1.MaxBodySize, so draining it before the next request stays
+// bounded.
 func (c *innerConn) read() (*http.Request, error) {
 	req, err := http.ReadRequest(c.r)
 	if err != nil {
 		return nil, err
 	}
-	req.Body = http.MaxBytesReader(nil, req.Body, connectionsv1.MaxBodySize)
+	if req.ContentLength < 0 || req.ContentLength > connectionsv1.MaxBodySize {
+		return nil, errBody
+	}
 	return req, nil
 }
 
@@ -93,13 +101,19 @@ func (c *innerConn) respond(status int, v any) error {
 
 // refuse writes an ErrorResponse with its reason's status.
 func (c *innerConn) refuse(reason connectionsv1.Reason, detail string, retryAfter time.Duration) error {
-	e := connectionsv1.ErrorResponse{Reason: reason, Detail: detail}
+	return c.write(connectionsv1.ErrorResponse{Reason: reason, Detail: detail}, retryAfter)
+}
+
+// writeError writes e, e.g. a PreconditionFailed with the current etag.
+func (c *innerConn) writeError(e connectionsv1.ErrorResponse) error { return c.write(e, 0) }
+
+func (c *innerConn) write(e connectionsv1.ErrorResponse, retryAfter time.Duration) error {
 	body, err := json.Marshal(e)
 	if err != nil {
 		return err
 	}
 	resp := &http.Response{
-		StatusCode:    reason.HTTPStatus(),
+		StatusCode:    e.Reason.HTTPStatus(),
 		ProtoMajor:    1,
 		ProtoMinor:    1,
 		Header:        http.Header{"Content-Type": {connectionsv1.ContentTypeJSON}},

@@ -41,9 +41,16 @@ type Keys interface {
 // Config configures the Connection API server.
 type Config struct {
 	// Client reads and writes the SDK's resources in Namespace.
-	Client    client.Client
+	Client client.Client
+	// APIReader reads uncached, before answering that a Connection is
+	// unknown. Defaults to Client.
+	APIReader client.Reader
 	Namespace string
 	Keys      Keys
+
+	// Status reports a Connection's Sessions and whether they reach kcp,
+	// for the status Control Call. Nil reports none.
+	Status func(connectionID string) (workspace connectionsv1.HostStatus, virtualWorkspaces map[string]connectionsv1.HostStatus)
 
 	// RetryWindow is how long after a token's expiry a Registration retry
 	// is honoured; it also sets unusedExpiresAt. Default 7 days.
@@ -70,6 +77,7 @@ type Config struct {
 type Server struct {
 	cfg     Config
 	limiter *limiter
+	unknown *unknownLimiter
 }
 
 // New returns the Connection API server.
@@ -86,7 +94,15 @@ func New(cfg Config) *Server {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Server{cfg: cfg, limiter: newLimiter(cfg.Limits.withDefaults())}
+	if cfg.APIReader == nil {
+		cfg.APIReader = cfg.Client
+	}
+	limits := cfg.Limits.withDefaults()
+	return &Server{
+		cfg:     cfg,
+		limiter: newLimiter(limits),
+		unknown: newUnknownLimiter(limits.UnknownTotal, limits.UnknownInterval, time.Now),
+	}
 }
 
 const segment = connectionsv1.PathPrefix + "/"
@@ -113,8 +129,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case parts[0] == "register":
 		s.serveRegister(w, r, parts[1])
+	case parts[1] == "control":
+		s.serveControl(w, r, parts[0])
 	default:
-		// Control Sessions and Sessions follow in their own steps.
+		// Sessions follow in their own step.
 		refuse(w, connectionsv1.ReasonNotFound, "", 0)
 	}
 }

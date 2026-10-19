@@ -16,7 +16,10 @@ limitations under the License.
 
 package connapi
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // Limits bound handshakes in progress: from the upgrade until the Inner TLS
 // handshake (and, for Registration, its one request) ends. There's no limit
@@ -26,6 +29,12 @@ type Limits struct {
 	PerKey int
 	// Total bounds handshakes for known tokens and Connections. Default 64.
 	Total int
+	// UnknownTotal bounds Control Session handshakes for unknown Connection
+	// IDs, which are accepted so "unknown" is answered inside the Inner TLS.
+	// Default 2.
+	UnknownTotal int
+	// UnknownInterval is the least time between two of them. Default 1s.
+	UnknownInterval time.Duration
 }
 
 func (l Limits) withDefaults() Limits {
@@ -34,6 +43,12 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.Total <= 0 {
 		l.Total = 64
+	}
+	if l.UnknownTotal <= 0 {
+		l.UnknownTotal = 2
+	}
+	if l.UnknownInterval <= 0 {
+		l.UnknownInterval = time.Second
 	}
 	return l
 }
@@ -68,6 +83,41 @@ func (l *limiter) acquire(key string) (release func(), ok bool) {
 			if l.perKey[key]--; l.perKey[key] == 0 {
 				delete(l.perKey, key)
 			}
+		})
+	}, true
+}
+
+// unknownLimiter bounds handshakes for unknown Connection IDs: concurrent,
+// and spaced in time.
+type unknownLimiter struct {
+	total    int
+	interval time.Duration
+	now      func() time.Time
+
+	mu     sync.Mutex
+	active int
+	last   time.Time
+}
+
+func newUnknownLimiter(total int, interval time.Duration, now func() time.Time) *unknownLimiter {
+	return &unknownLimiter{total: total, interval: interval, now: now}
+}
+
+func (l *unknownLimiter) acquire() (release func(), ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	if l.active >= l.total || (!l.last.IsZero() && now.Sub(l.last) < l.interval) {
+		return nil, false
+	}
+	l.active++
+	l.last = now
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			l.active--
 		})
 	}, true
 }

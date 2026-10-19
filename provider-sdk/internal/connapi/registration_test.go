@@ -103,6 +103,7 @@ func newFixture(t *testing.T) *fixture {
 		Namespace: ns,
 		Keys:      keys{"sk-1": key},
 		IsLeader:  func() bool { return f.leader },
+		Limits:    Limits{UnknownInterval: time.Millisecond},
 		Now:       func() time.Time { return f.now },
 	})
 	f.srv = httptest.NewTLSServer(http.StripPrefix("/pm", f.server))
