@@ -151,7 +151,7 @@ Authorization: Bearer <tokenSecret>
 |---|---|
 | WebSocket message | 32 KB |
 | Ping interval | 30 s |
-| Request or response body | 128 KB (`MaxBodySize`) |
+| Request or response body | 256 KB (`MaxBodySize`) |
 | Error body read | 16 KB (`MaxErrorBodySize`) |
 | Hello | 4 KB, 1–4 hosts, `sub` ≤ 128 printable ASCII |
 | Pinned Bundle | 32 certificates, 64 KB |

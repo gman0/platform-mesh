@@ -26,6 +26,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.platform-mesh.io/provider-protocol/bundle"
 )
 
 func TestIfMatch(t *testing.T) {
@@ -154,4 +156,9 @@ func response(status int, contentType, body string) *http.Response {
 		Header:     http.Header{"Content-Type": []string{contentType}},
 		Body:       io.NopCloser(strings.NewReader(body)),
 	}
+}
+
+func TestMaxBodySizeFitsTheLargestBundle(t *testing.T) {
+	// A bundle's allowed whitespace doubles when escaped in JSON.
+	assert.GreaterOrEqual(t, MaxBodySize, 2*bundle.MaxSize+4096)
 }

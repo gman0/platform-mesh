@@ -31,8 +31,9 @@ import (
 
 const (
 	// MaxBodySize bounds every request and response body: room for a
-	// Registration with the largest Pinned Bundle.
-	MaxBodySize = 128 * 1024
+	// Registration with the largest Pinned Bundle (64 KB), whose whitespace
+	// doubles when escaped in JSON.
+	MaxBodySize = 256 * 1024
 	// MaxErrorBodySize bounds how much of an error response is read.
 	MaxErrorBodySize = 16 * 1024
 )
