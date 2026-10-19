@@ -36,6 +36,13 @@ const (
 	ConnectionReasonKcpUnreachable = "KcpUnreachable"
 )
 
+// Removal reasons, in AnnotationRemovalReason.
+const (
+	RemovalReasonDeleted               = "Deleted"
+	RemovalReasonDeletedByPlatformMesh = "DeletedByPlatformMesh"
+	RemovalReasonUnused                = "Unused"
+)
+
 // Events on a Connection. A Provider that tells its customers about changes
 // watches these. Failed authentications are never Events.
 const (
@@ -58,6 +65,11 @@ const (
 
 	// KubeconfigKey is the kubeconfig's key in the Secret.
 	KubeconfigKey = "kubeconfig"
+
+	// AnnotationRemovalReason on a Connection being deleted names why, for
+	// the Removed Event: e.g. DeletedByPlatformMesh, Unused. Without it, the
+	// reason is Deleted.
+	AnnotationRemovalReason = "provider-sdk.platform-mesh.io/removal-reason"
 
 	// AnnotationRotateProxyCredential on a Connection: every new value
 	// writes a new proxy credential into its kubeconfig Secret; the old one

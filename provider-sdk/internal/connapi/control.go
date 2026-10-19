@@ -139,6 +139,12 @@ func (s *Server) controlCall(ctx context.Context, c *innerConn, req *http.Reques
 	case call == "" && req.Method == http.MethodGet:
 		return s.status(ctx, c, &conn)
 	case call == "" && req.Method == http.MethodDelete:
+		patch := client.MergeFrom(conn.DeepCopy())
+		metav1.SetMetaDataAnnotation(&conn.ObjectMeta, sdkv1alpha1.AnnotationRemovalReason, sdkv1alpha1.RemovalReasonDeletedByPlatformMesh)
+		if err := s.cfg.Client.Patch(ctx, &conn, patch); err != nil && !apierrors.IsNotFound(err) {
+			_ = c.refuse(connectionsv1.ReasonUnavailable, "", connectionsv1.StandbyRetryAfter)
+			return false
+		}
 		if err := s.cfg.Client.Delete(ctx, &conn); err != nil && !apierrors.IsNotFound(err) {
 			_ = c.refuse(connectionsv1.ReasonUnavailable, "", connectionsv1.StandbyRetryAfter)
 			return false
