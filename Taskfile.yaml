@@ -45,6 +45,7 @@ vars:
     - subroutines
     - golang-commons
     - provider-protocol
+    - provider-sdk
 
     # operators
     - account-operator
