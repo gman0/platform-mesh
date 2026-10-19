@@ -51,6 +51,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ManagedProviderList{},
 		&Provider{},
 		&ProviderList{},
+		&ProviderOnboardingRequest{},
+		&ProviderOnboardingRequestList{},
 		&ProviderPermissions{},
 		&ProviderPermissionsList{},
 	)
