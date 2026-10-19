@@ -17,13 +17,10 @@ limitations under the License.
 package innertls
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
-	"net"
-	"sync"
 	"testing"
 	"time"
 
@@ -34,59 +31,8 @@ import (
 	"go.platform-mesh.io/provider-protocol/bundle"
 	"go.platform-mesh.io/provider-protocol/fingerprint"
 	"go.platform-mesh.io/provider-protocol/internal/testcerts"
+	tv "go.platform-mesh.io/provider-protocol/testvectors"
 )
-
-type result struct {
-	client, server       error
-	clientCS, serverCS   tls.ConnectionState
-}
-
-// handshake runs both ends over loopback TCP. Its buffers let a failing end
-// write its alert while the other end is writing too, which an unbuffered
-// net.Pipe would deadlock on. A failing end closes its connection, so the
-// other one doesn't wait.
-func handshake(t *testing.T, client, server *tls.Config) result {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	defer ln.Close()
-
-	var r result
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sc, err := ln.Accept()
-		if err != nil {
-			r.server = err
-			return
-		}
-		defer sc.Close()
-		s := tls.Server(sc, server)
-		if r.server = s.HandshakeContext(ctx); r.server != nil {
-			return
-		}
-		r.serverCS = s.ConnectionState()
-	}()
-
-	cc, err := net.Dial("tcp", ln.Addr().String())
-	require.NoError(t, err)
-	c := tls.Client(cc, client)
-	if r.client = c.HandshakeContext(ctx); r.client == nil {
-		r.clientCS = c.ConnectionState()
-	}
-	// Closing lets a server still waiting for the client's Finished, or for
-	// an alert, finish with an error.
-	if r.client != nil {
-		_ = cc.Close()
-	}
-	wg.Wait()
-	_ = cc.Close()
-	return r
-}
 
 func newServerKey(t *testing.T) ServerKey {
 	t.Helper()
@@ -126,61 +72,61 @@ func TestNewServerKey(t *testing.T) {
 
 func TestControlHandshake(t *testing.T) {
 	sk := newServerKey(t)
-	r := handshake(t,
+	r := tv.Handshake(t,
 		Client(ClientOptions{ServerKeys: []fingerprint.Fingerprint{sk.Fingerprint}, Protocols: control}),
 		Server(sk, control))
-	require.NoError(t, r.client)
-	require.NoError(t, r.server)
+	require.NoError(t, r.Client)
+	require.NoError(t, r.Server)
 
-	assert.Equal(t, connectionsv1.ALPNControl, r.clientCS.NegotiatedProtocol)
-	assert.Equal(t, uint16(tls.VersionTLS13), r.clientCS.Version)
-	assert.Equal(t, sk.Fingerprint, PeerServerKey(r.clientCS))
-	assert.Nil(t, ClientCertificate(r.serverCS), "no client certificate on control")
+	assert.Equal(t, connectionsv1.ALPNControl, r.ClientState.NegotiatedProtocol)
+	assert.Equal(t, uint16(tls.VersionTLS13), r.ClientState.Version)
+	assert.Equal(t, sk.Fingerprint, PeerServerKey(r.ClientState))
+	assert.Nil(t, ClientCertificate(r.ServerState), "no client certificate on control")
 }
 
 func TestClientAcceptsAnyPinnedKey(t *testing.T) {
 	old, cur := newServerKey(t), newServerKey(t)
 	pins := []fingerprint.Fingerprint{old.Fingerprint, cur.Fingerprint}
 	for _, sk := range []ServerKey{old, cur} {
-		r := handshake(t, Client(ClientOptions{ServerKeys: pins, Protocols: control}), Server(sk, control))
-		assert.NoError(t, r.client)
+		r := tv.Handshake(t, Client(ClientOptions{ServerKeys: pins, Protocols: control}), Server(sk, control))
+		assert.NoError(t, r.Client)
 	}
 }
 
 func TestClientRefusesUnpinnedKey(t *testing.T) {
-	r := handshake(t,
+	r := tv.Handshake(t,
 		Client(ClientOptions{ServerKeys: []fingerprint.Fingerprint{newServerKey(t).Fingerprint}, Protocols: control}),
 		Server(newServerKey(t), control))
-	assert.ErrorIs(t, r.client, ErrServerKeyNotPinned)
-	assert.Error(t, r.server)
+	assert.ErrorIs(t, r.Client, ErrServerKeyNotPinned)
+	assert.Error(t, r.Server)
 
-	r = handshake(t, Client(ClientOptions{Protocols: control}), Server(newServerKey(t), control))
-	assert.ErrorIs(t, r.client, ErrServerKeyNotPinned, "nothing pinned")
+	r = tv.Handshake(t, Client(ClientOptions{Protocols: control}), Server(newServerKey(t), control))
+	assert.ErrorIs(t, r.Client, ErrServerKeyNotPinned, "nothing pinned")
 }
 
 func TestProtocolsMustMatch(t *testing.T) {
 	sk := newServerKey(t)
 	pins := []fingerprint.Fingerprint{sk.Fingerprint}
 
-	r := handshake(t,
+	r := tv.Handshake(t,
 		Client(ClientOptions{ServerKeys: pins, Protocols: []string{connectionsv1.ALPNRegister}}),
 		Server(sk, control))
-	assert.Error(t, r.client, "register client at a control server")
-	assert.Error(t, r.server)
+	assert.Error(t, r.Client, "register client at a control server")
+	assert.Error(t, r.Server)
 
 	noALPN := Client(ClientOptions{ServerKeys: pins})
-	r = handshake(t, noALPN, Server(sk, control))
-	assert.ErrorIs(t, r.server, ErrNoProtocol, "client offers no protocol")
+	r = tv.Handshake(t, noALPN, Server(sk, control))
+	assert.ErrorIs(t, r.Server, ErrNoProtocol, "client offers no protocol")
 
-	r = handshake(t, Client(ClientOptions{ServerKeys: pins, Protocols: control}), &tls.Config{Certificates: []tls.Certificate{sk.Certificate}})
-	assert.ErrorIs(t, r.client, ErrNoProtocol, "server selects no protocol")
+	r = tv.Handshake(t, Client(ClientOptions{ServerKeys: pins, Protocols: control}), &tls.Config{Certificates: []tls.Certificate{sk.Certificate}})
+	assert.ErrorIs(t, r.Client, ErrNoProtocol, "server selects no protocol")
 }
 
 func TestTLS12Refused(t *testing.T) {
 	sk := newServerKey(t)
 	old := &tls.Config{InsecureSkipVerify: true, MaxVersion: tls.VersionTLS12, NextProtos: control}
-	r := handshake(t, old, Server(sk, control))
-	assert.Error(t, r.server)
+	r := tv.Handshake(t, old, Server(sk, control))
+	assert.Error(t, r.Server)
 }
 
 func TestNoResumption(t *testing.T) {
@@ -190,17 +136,17 @@ func TestNoResumption(t *testing.T) {
 	server := Server(sk, control)
 
 	for range 2 {
-		r := handshake(t, client, server)
-		require.NoError(t, r.client)
-		assert.False(t, r.clientCS.DidResume)
+		r := tv.Handshake(t, client, server)
+		require.NoError(t, r.Client)
+		assert.False(t, r.ClientState.DidResume)
 	}
 }
 
 var session = []string{connectionsv1.ALPNSession}
 
-func sessionPair(t *testing.T, sk ServerKey, pinned func() *bundle.Bundle, cert *tls.Certificate) result {
+func sessionPair(t *testing.T, sk ServerKey, pinned func() *bundle.Bundle, cert *tls.Certificate) tv.HandshakeResult {
 	t.Helper()
-	return handshake(t,
+	return tv.Handshake(t,
 		Client(ClientOptions{ServerKeys: []fingerprint.Fingerprint{sk.Fingerprint}, Protocols: session, Certificate: cert}),
 		SessionServer(sk, pinned, session, fixedNow))
 }
@@ -212,10 +158,10 @@ func TestSessionHandshake(t *testing.T) {
 	cert := leaf.TLS()
 
 	r := sessionPair(t, sk, pinnedBundle(t, ca), &cert)
-	require.NoError(t, r.client)
-	require.NoError(t, r.server)
-	assert.Equal(t, connectionsv1.ALPNSession, r.serverCS.NegotiatedProtocol)
-	assert.Equal(t, leaf.Cert.Raw, ClientCertificate(r.serverCS).Raw)
+	require.NoError(t, r.Client)
+	require.NoError(t, r.Server)
+	assert.Equal(t, connectionsv1.ALPNSession, r.ServerState.NegotiatedProtocol)
+	assert.Equal(t, leaf.Cert.Raw, ClientCertificate(r.ServerState).Raw)
 }
 
 func TestSessionRefuses(t *testing.T) {
@@ -252,8 +198,8 @@ func TestSessionRefuses(t *testing.T) {
 	// certificate, so only the server's result counts here.
 	for name, c := range cases {
 		r := sessionPair(t, sk, c.pinned, c.cert)
-		if assert.Error(t, r.server, name) && c.want != nil {
-			assert.ErrorIs(t, r.server, c.want, name)
+		if assert.Error(t, r.Server, name) && c.want != nil {
+			assert.ErrorIs(t, r.Server, c.want, name)
 		}
 	}
 }
