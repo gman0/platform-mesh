@@ -44,6 +44,7 @@ vars:
     - apis
     - subroutines
     - golang-commons
+    - provider-protocol
 
     # operators
     - account-operator
@@ -69,6 +70,7 @@ vars:
     - apis
     - subroutines
     - golang-commons
+    - provider-protocol
 
 tasks:
   default:
