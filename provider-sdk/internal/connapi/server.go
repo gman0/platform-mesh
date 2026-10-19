@@ -31,6 +31,7 @@ import (
 	"go.platform-mesh.io/provider-protocol/innertls"
 
 	sdkv1alpha1 "go.platform-mesh.io/provider-sdk/api/v1alpha1"
+	"go.platform-mesh.io/provider-sdk/internal/session"
 )
 
 // Keys loads Server Keys for the Inner TLS, by ServerKey name.
@@ -48,8 +49,12 @@ type Config struct {
 	Namespace string
 	Keys      Keys
 
+	// Sessions holds the live Sessions. Nil serves no Sessions.
+	Sessions *session.Registry
+
 	// Status reports a Connection's Sessions and whether they reach kcp,
-	// for the status Control Call. Nil reports none.
+	// for the status Control Call. Defaults to Sessions.Status; nil reports
+	// none.
 	Status func(connectionID string) (workspace connectionsv1.HostStatus, virtualWorkspaces map[string]connectionsv1.HostStatus)
 
 	// RetryWindow is how long after a token's expiry a Registration retry
@@ -97,6 +102,9 @@ func New(cfg Config) *Server {
 	if cfg.APIReader == nil {
 		cfg.APIReader = cfg.Client
 	}
+	if cfg.Status == nil && cfg.Sessions != nil {
+		cfg.Status = cfg.Sessions.Status
+	}
 	limits := cfg.Limits.withDefaults()
 	return &Server{
 		cfg:     cfg,
@@ -131,8 +139,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.serveRegister(w, r, parts[1])
 	case parts[1] == "control":
 		s.serveControl(w, r, parts[0])
+	case parts[1] == "session" && s.cfg.Sessions != nil:
+		s.serveSession(w, r, parts[0])
 	default:
-		// Sessions follow in their own step.
 		refuse(w, connectionsv1.ReasonNotFound, "", 0)
 	}
 }

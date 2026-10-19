@@ -44,6 +44,7 @@ import (
 	tv "go.platform-mesh.io/provider-protocol/testvectors"
 
 	sdkv1alpha1 "go.platform-mesh.io/provider-sdk/api/v1alpha1"
+	"go.platform-mesh.io/provider-sdk/internal/session"
 	"go.platform-mesh.io/provider-sdk/pmtest"
 )
 
@@ -58,8 +59,9 @@ type fixture struct {
 	server *Server
 	key    innertls.ServerKey
 	keyObj *sdkv1alpha1.ServerKey
-	pm     *pmtest.PM
-	now    time.Time
+	pm       *pmtest.PM
+	sessions *session.Registry
+	now      time.Time
 	leader bool
 }
 
@@ -97,11 +99,12 @@ func newFixture(t *testing.T) *fixture {
 		WithStatusSubresource(&sdkv1alpha1.Connection{}, &sdkv1alpha1.OnboardingToken{}, &sdkv1alpha1.ServerKey{}).
 		WithObjects(keyObj).Build()
 
-	f := &fixture{t: t, client: c, key: key, keyObj: keyObj, pm: pmtest.New(t), now: tv.Now, leader: true}
+	f := &fixture{t: t, client: c, key: key, keyObj: keyObj, pm: pmtest.New(t), sessions: session.NewRegistry(), now: tv.Now, leader: true}
 	f.server = New(Config{
 		Client:    c,
 		Namespace: ns,
 		Keys:      keys{"sk-1": key},
+		Sessions:  f.sessions,
 		IsLeader:  func() bool { return f.leader },
 		Limits:    Limits{UnknownInterval: time.Millisecond},
 		Now:       func() time.Time { return f.now },
