@@ -14,6 +14,7 @@
 - `api/v1alpha1`: `Connection`, `OnboardingToken`, `ServerKey` (`provider-sdk.platform-mesh.io`).
 - `config/crd/bases`: generated CRDs.
 - `pmtest`: a fake PM-side for tests: Registration, Control Sessions, Sessions.
+- `token`: Onboarding Tokens for portals: `PickServerKey`, `New`, `Issue`.
 
 ## Commands
 - `task generate` — CRDs and deepcopy for `api/`.
