@@ -34,8 +34,15 @@ import (
 
 const (
 	// MaxSize bounds a bundle's PEM text.
+	//
+	// Normally, ECDSA P-256 CA is around 800 bytes, RSA-4096 CA is 3kB.
+	// Way more than we need, just in case.
 	MaxSize = 64 * 1024
+
 	// MaxCertificates bounds the number of certificates in a bundle.
+	//
+	// This is the maximum the provider-operator will send to the Provider.
+	// Way more than we normally send (1-2 certs).
 	MaxCertificates = 32
 )
 
