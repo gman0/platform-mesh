@@ -17,6 +17,7 @@
 - `token`: Onboarding Tokens for portals: `PickServerKey`, `New`, `Issue`.
 - `internal/connapi`: the Connection API server: routing, handshake limits, Registration, Control Sessions, Session upgrades.
 - `internal/session`: accepting Sessions (mutual Inner TLS, Hello, yamux) and the registry of live Sessions: Streams by host, status, re-checks, closing.
+- `internal/controllers`: reconcilers for the SDK's resources (`ServerKey` so far) and `KeyStore`, which loads Server Keys for the Inner TLS.
 
 ## Commands
 - `task generate` — CRDs and deepcopy for `api/`.
