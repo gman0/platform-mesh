@@ -16,6 +16,7 @@
 - `credential`: Onboarding Token and Connection Secret formats, their hashes, token and Connection IDs.
 - `bundle`: the strict Pinned Bundle parser, its `etag`, and Connector Certificate checks against it.
 - `innertls`: `tls.Config`s of the Inner TLS: Server Keys, key pinning, Connector Certificate verification.
+- `wsconn`: a `net.Conn` over WebSocket binary messages, with the protocol's framing; the dialer and upgrader settings.
 - `internal/testcerts`: CAs and Connector Certificates for tests.
 
 ## Commands
