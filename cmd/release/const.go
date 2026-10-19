@@ -42,6 +42,7 @@ var componentOrder = []string{
 	"golang-commons",
 	"subroutines",
 	"apis",
+	"provider-protocol",
 	"account-operator",
 	"backup-operator",
 	"extension-manager-operator",
@@ -63,6 +64,7 @@ var components = map[string]component{
 	"golang-commons":              {"golang-commons/v", "go-gettable module tag for go.platform-mesh.io/golang-commons (no image)"},
 	"subroutines":                 {"subroutines/v", "go-gettable module tag for go.platform-mesh.io/subroutines (no image)"},
 	"apis":                        {"apis/v", "go-gettable module tag for go.platform-mesh.io/apis (no image)"},
+	"provider-protocol":           {"provider-protocol/v", "go-gettable module tag for go.platform-mesh.io/provider-protocol (no image)"},
 	"account-operator":            {"account-operator/v", "account-operator.yml: builds + signs the image, cuts a GitHub release, bumps the chart, publishes SBOM + signed OCM component"},
 	"backup-operator":             {"backup-operator/v", "backup-operator.yml: builds + signs the image, cuts a GitHub release, bumps the chart, publishes SBOM + signed OCM component"},
 	"extension-manager-operator":  {"extension-manager-operator/v", "extension-manager-operator.yml: builds + signs the image, cuts a GitHub release, bumps the chart, publishes SBOM + signed OCM component"},
@@ -89,4 +91,5 @@ var libraryComponents = map[string]bool{
 	"golang-commons": true,
 	"subroutines":    true,
 	"apis":           true,
+	"provider-protocol": true,
 }
