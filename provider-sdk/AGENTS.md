@@ -15,6 +15,7 @@
 - `config/crd/bases`: generated CRDs.
 - `pmtest`: a fake PM-side for tests: Registration, Control Sessions, Sessions.
 - `token`: Onboarding Tokens for portals: `PickServerKey`, `New`, `Issue`.
+- `internal/connapi`: the Connection API server: routing, handshake limits, Registration (Control Sessions and Sessions follow).
 
 ## Commands
 - `task generate` — CRDs and deepcopy for `api/`.
