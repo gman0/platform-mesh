@@ -15,6 +15,8 @@
 - `fingerprint`: `cert-sha256:` and `key-sha256:` fingerprints.
 - `credential`: Onboarding Token and Connection Secret formats, their hashes, token and Connection IDs.
 - `bundle`: the strict Pinned Bundle parser, its `etag`, and Connector Certificate checks against it.
+- `innertls`: `tls.Config`s of the Inner TLS: Server Keys, key pinning, Connector Certificate verification.
+- `internal/testcerts`: CAs and Connector Certificates for tests.
 
 ## Commands
 - `task test` — run the unit tests.

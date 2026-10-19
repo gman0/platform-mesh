@@ -22,54 +22,56 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.platform-mesh.io/provider-protocol/internal/testcerts"
 )
 
-func mustParse(t *testing.T, cas ...issued) *Bundle {
+func mustParse(t *testing.T, cas ...testcerts.Cert) *Bundle {
 	t.Helper()
 	var data []byte
 	for _, c := range cas {
-		data = append(data, c.pem()...)
+		data = append(data, c.PEM()...)
 	}
-	b, err := Parse(data, now)
+	b, err := Parse(data, testcerts.Now)
 	require.NoError(t, err)
 	return b
 }
 
 func TestVerifyClient(t *testing.T) {
-	ca := newCA(t, "current", nil)
+	ca := testcerts.CA(t, "current", nil)
 	b := mustParse(t, ca)
-	assert.NoError(t, b.VerifyClient(newLeaf(t, ca).cert, now))
+	assert.NoError(t, b.VerifyClient(testcerts.Leaf(t, ca).Cert, testcerts.Now))
 }
 
 func TestVerifyClientWithPreviousCA(t *testing.T) {
-	prev, cur := newCA(t, "previous", nil), newCA(t, "current", nil)
+	prev, cur := testcerts.CA(t, "previous", nil), testcerts.CA(t, "current", nil)
 	b := mustParse(t, prev, cur)
-	assert.NoError(t, b.VerifyClient(newLeaf(t, prev).cert, now))
-	assert.NoError(t, b.VerifyClient(newLeaf(t, cur).cert, now))
+	assert.NoError(t, b.VerifyClient(testcerts.Leaf(t, prev).Cert, testcerts.Now))
+	assert.NoError(t, b.VerifyClient(testcerts.Leaf(t, cur).Cert, testcerts.Now))
 }
 
 func TestVerifyClientRefuses(t *testing.T) {
-	ca := newCA(t, "pinned", nil)
-	other := newCA(t, "unpinned", nil)
-	intermediate := newCA(t, "intermediate", &ca)
-	expiredCA := newCA(t, "expired", nil, expired)
+	ca := testcerts.CA(t, "pinned", nil)
+	other := testcerts.CA(t, "unpinned", nil)
+	intermediate := testcerts.CA(t, "intermediate", &ca)
+	expiredCA := testcerts.CA(t, "expired", nil, testcerts.Expired)
 	b := mustParse(t, ca, expiredCA)
 
 	cases := map[string]struct {
-		leaf issued
+		leaf testcerts.Cert
 		want error
 	}{
-		"unpinned CA":          {newLeaf(t, other), nil},
-		"expired leaf":         {newLeaf(t, ca, expired), nil},
-		"pinned CA expired":    {newLeaf(t, expiredCA), nil},
-		"through intermediate": {newLeaf(t, intermediate), nil},
-		"no EKU":               {newLeaf(t, ca, noEKU), ErrClientUsage},
-		"serverAuth only":      {newLeaf(t, ca, serverEKU), ErrClientUsage},
-		"no digitalSignature":  {newLeaf(t, ca, noDigitalSignature), ErrClientUsage},
+		"unpinned CA":          {testcerts.Leaf(t, other), nil},
+		"expired leaf":         {testcerts.Leaf(t, ca, testcerts.Expired), nil},
+		"pinned CA expired":    {testcerts.Leaf(t, expiredCA), nil},
+		"through intermediate": {testcerts.Leaf(t, intermediate), nil},
+		"no EKU":               {testcerts.Leaf(t, ca, testcerts.NoEKU), ErrClientUsage},
+		"serverAuth only":      {testcerts.Leaf(t, ca, testcerts.ServerEKU), ErrClientUsage},
+		"no digitalSignature":  {testcerts.Leaf(t, ca, testcerts.NoDigitalSignature), ErrClientUsage},
 		"the CA itself":        {ca, ErrClientUsage},
 	}
 	for name, c := range cases {
-		err := b.VerifyClient(c.leaf.cert, now)
+		err := b.VerifyClient(c.leaf.Cert, testcerts.Now)
 		if assert.Error(t, err, name) && c.want != nil {
 			assert.ErrorIs(t, err, c.want, name)
 		}
@@ -79,31 +81,31 @@ func TestVerifyClientRefuses(t *testing.T) {
 func TestVerifyClientPinnedIntermediate(t *testing.T) {
 	// With an external PKI, PM's CA is an intermediate, pinned as the
 	// anchor: its leaves are issued directly by a pinned CA.
-	root := newCA(t, "root", nil)
-	intermediate := newCA(t, "intermediate", &root)
+	root := testcerts.CA(t, "root", nil)
+	intermediate := testcerts.CA(t, "intermediate", &root)
 	b := mustParse(t, root, intermediate)
-	assert.NoError(t, b.VerifyClient(newLeaf(t, intermediate).cert, now))
+	assert.NoError(t, b.VerifyClient(testcerts.Leaf(t, intermediate).Cert, testcerts.Now))
 }
 
 func TestIssued(t *testing.T) {
-	prev, cur, other := newCA(t, "previous", nil), newCA(t, "current", nil), newCA(t, "other", nil)
+	prev, cur, other := testcerts.CA(t, "previous", nil), testcerts.CA(t, "current", nil), testcerts.CA(t, "other", nil)
 	both := mustParse(t, prev, cur)
 	onlyCur := mustParse(t, cur)
 
-	fromPrev := newLeaf(t, prev).cert
+	fromPrev := testcerts.Leaf(t, prev).Cert
 	assert.True(t, both.Issued(fromPrev))
 	assert.False(t, onlyCur.Issued(fromPrev), "dropping a CA ends its Sessions")
-	assert.False(t, both.Issued(newLeaf(t, other).cert))
+	assert.False(t, both.Issued(testcerts.Leaf(t, other).Cert))
 
 	// Expiry doesn't count: an open Session outlives its certificate.
-	assert.True(t, onlyCur.Issued(newLeaf(t, cur, expired).cert))
-	assert.NoError(t, onlyCur.VerifyClient(newLeaf(t, cur).cert, now))
-	assert.Error(t, onlyCur.VerifyClient(newLeaf(t, cur).cert, now.Add(48*time.Hour)))
+	assert.True(t, onlyCur.Issued(testcerts.Leaf(t, cur, testcerts.Expired).Cert))
+	assert.NoError(t, onlyCur.VerifyClient(testcerts.Leaf(t, cur).Cert, testcerts.Now))
+	assert.Error(t, onlyCur.VerifyClient(testcerts.Leaf(t, cur).Cert, testcerts.Now.Add(48*time.Hour)))
 }
 
 func TestIssuedSameNameDifferentKey(t *testing.T) {
 	// A CA with the same subject but another key doesn't count as issuer.
-	genuine, impostor := newCA(t, "connector-ca", nil), newCA(t, "connector-ca", nil)
+	genuine, impostor := testcerts.CA(t, "connector-ca", nil), testcerts.CA(t, "connector-ca", nil)
 	b := mustParse(t, genuine)
-	assert.False(t, b.Issued(newLeaf(t, impostor).cert))
+	assert.False(t, b.Issued(testcerts.Leaf(t, impostor).Cert))
 }

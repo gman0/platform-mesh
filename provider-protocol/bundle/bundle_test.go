@@ -26,54 +26,55 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.platform-mesh.io/provider-protocol/fingerprint"
+	"go.platform-mesh.io/provider-protocol/internal/testcerts"
 )
 
 func TestParse(t *testing.T) {
-	a, b := newCA(t, "a", nil), newCA(t, "b", nil)
+	a, b := testcerts.CA(t, "a", nil), testcerts.CA(t, "b", nil)
 
-	got, err := Parse(join(a.pem(), b.pem()), now)
+	got, err := Parse(testcerts.Join(a.PEM(), b.PEM()), testcerts.Now)
 	require.NoError(t, err)
 	assert.Len(t, got.Certificates(), 2)
-	assert.True(t, got.Contains(fingerprint.OfCertificate(a.cert)))
-	assert.True(t, got.Contains(fingerprint.OfCertificate(b.cert)))
-	assert.False(t, got.Contains(fingerprint.OfCertificate(newCA(t, "c", nil).cert)))
+	assert.True(t, got.Contains(fingerprint.OfCertificate(a.Cert)))
+	assert.True(t, got.Contains(fingerprint.OfCertificate(b.Cert)))
+	assert.False(t, got.Contains(fingerprint.OfCertificate(testcerts.CA(t, "c", nil).Cert)))
 
 	fps := got.Fingerprints()
 	assert.True(t, strings.Compare(fps[0].String(), fps[1].String()) < 0, "sorted")
 }
 
 func TestParseAllowsWhitespace(t *testing.T) {
-	a, b := newCA(t, "a", nil), newCA(t, "b", nil)
-	data := join([]byte("\n \t\r\n"), a.pem(), []byte("\n\n  \r\n"), b.pem(), []byte(" \n\t"))
-	_, err := Parse(data, now)
+	a, b := testcerts.CA(t, "a", nil), testcerts.CA(t, "b", nil)
+	data := testcerts.Join([]byte("\n \t\r\n"), a.PEM(), []byte("\n\n  \r\n"), b.PEM(), []byte(" \n\t"))
+	_, err := Parse(data, testcerts.Now)
 	assert.NoError(t, err)
 }
 
 func TestParseKeepsSomeExpired(t *testing.T) {
 	// An expired CA may be in the set, as long as one is unexpired.
-	_, err := Parse(join(newCA(t, "old", nil, expired).pem(), newCA(t, "new", nil).pem()), now)
+	_, err := Parse(testcerts.Join(testcerts.CA(t, "old", nil, testcerts.Expired).PEM(), testcerts.CA(t, "new", nil).PEM()), testcerts.Now)
 	assert.NoError(t, err)
 }
 
 func TestParseAcceptsIntermediateCA(t *testing.T) {
 	// With an external PKI, PM's CA is an intermediate, pinned as the
 	// anchor.
-	root := newCA(t, "external root", nil)
-	_, err := Parse(newCA(t, "pm", &root).pem(), now)
+	root := testcerts.CA(t, "external root", nil)
+	_, err := Parse(testcerts.CA(t, "pm", &root).PEM(), testcerts.Now)
 	assert.NoError(t, err)
 }
 
 func TestParseRefuses(t *testing.T) {
-	a, b := newCA(t, "a", nil), newCA(t, "b", nil)
+	a, b := testcerts.CA(t, "a", nil), testcerts.CA(t, "b", nil)
 	key := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: []byte{1, 2, 3}})
-	withHeaders := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Headers: map[string]string{"Proc-Type": "4,ENCRYPTED"}, Bytes: a.cert.Raw})
+	withHeaders := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Headers: map[string]string{"Proc-Type": "4,ENCRYPTED"}, Bytes: a.Cert.Raw})
 	garbled := []byte("-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n")
 	notDER := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("not a certificate")})
-	leaf := newLeaf(t, a)
+	leaf := testcerts.Leaf(t, a)
 
 	var many [][]byte
 	for range MaxCertificates + 1 {
-		many = append(many, newCA(t, "m", nil).pem())
+		many = append(many, testcerts.CA(t, "m", nil).PEM())
 	}
 
 	cases := map[string]struct {
@@ -82,25 +83,25 @@ func TestParseRefuses(t *testing.T) {
 	}{
 		"empty":                     {nil, ReasonEmpty},
 		"whitespace only":           {[]byte(" \n\t\r\n"), ReasonEmpty},
-		"text before":               {join([]byte("ca:\n"), a.pem()), ReasonTextOutsideBlocks},
-		"text between":              {join(a.pem(), []byte("# next\n"), b.pem()), ReasonTextOutsideBlocks},
-		"text after":                {join(a.pem(), []byte("end")), ReasonTextOutsideBlocks},
+		"text before":               {testcerts.Join([]byte("ca:\n"), a.PEM()), ReasonTextOutsideBlocks},
+		"text between":              {testcerts.Join(a.PEM(), []byte("# next\n"), b.PEM()), ReasonTextOutsideBlocks},
+		"text after":                {testcerts.Join(a.PEM(), []byte("end")), ReasonTextOutsideBlocks},
 		"garbled block":             {garbled, ReasonMalformedPEM},
-		"garbled then good":         {join(garbled, a.pem()), ReasonMalformedPEM},
-		"unterminated":              {a.pem()[:len(a.pem())-10], ReasonMalformedPEM},
-		"private key":               {join(a.pem(), key), ReasonNotCertificate},
+		"garbled then good":         {testcerts.Join(garbled, a.PEM()), ReasonMalformedPEM},
+		"unterminated":              {a.PEM()[:len(a.PEM())-10], ReasonMalformedPEM},
+		"private key":               {testcerts.Join(a.PEM(), key), ReasonNotCertificate},
 		"PEM headers":               {withHeaders, ReasonPEMHeaders},
 		"not DER":                   {notDER, ReasonMalformedCertificate},
-		"leaf, not CA":              {leaf.pem(), ReasonNotCA},
-		"CA:false":                  {newCA(t, "x", nil, notCA).pem(), ReasonNotCA},
-		"no keyCertSign":            {newCA(t, "x", nil, noCertSign).pem(), ReasonNotCA},
-		"duplicate":                 {join(a.pem(), b.pem(), a.pem()), ReasonDuplicate},
-		"only expired":              {join(newCA(t, "x", nil, expired).pem(), newCA(t, "y", nil, expired).pem()), ReasonAllExpired},
-		"too many":                  {join(many...), ReasonTooMany},
-		"too large":                 {join(a.pem(), bytes.Repeat([]byte("\n"), MaxSize)), ReasonTooLarge},
+		"leaf, not CA":              {leaf.PEM(), ReasonNotCA},
+		"CA:false":                  {testcerts.CA(t, "x", nil, testcerts.NotCA).PEM(), ReasonNotCA},
+		"no keyCertSign":            {testcerts.CA(t, "x", nil, testcerts.NoCertSign).PEM(), ReasonNotCA},
+		"duplicate":                 {testcerts.Join(a.PEM(), b.PEM(), a.PEM()), ReasonDuplicate},
+		"only expired":              {testcerts.Join(testcerts.CA(t, "x", nil, testcerts.Expired).PEM(), testcerts.CA(t, "y", nil, testcerts.Expired).PEM()), ReasonAllExpired},
+		"too many":                  {testcerts.Join(many...), ReasonTooMany},
+		"too large":                 {testcerts.Join(a.PEM(), bytes.Repeat([]byte("\n"), MaxSize)), ReasonTooLarge},
 	}
 	for name, c := range cases {
-		_, err := Parse(c.data, now)
+		_, err := Parse(c.data, testcerts.Now)
 		r, ok := ReasonOf(err)
 		if assert.True(t, ok, "%s: %v", name, err) {
 			assert.Equal(t, c.reason, r, name)
@@ -109,21 +110,21 @@ func TestParseRefuses(t *testing.T) {
 }
 
 func TestParseRefusesTextOnEndLine(t *testing.T) {
-	a := newCA(t, "a", nil)
-	data := bytes.Replace(a.pem(), []byte("-----END CERTIFICATE-----"), []byte("-----END CERTIFICATE----- x"), 1)
-	_, err := Parse(data, now)
+	a := testcerts.CA(t, "a", nil)
+	data := bytes.Replace(a.PEM(), []byte("-----END CERTIFICATE-----"), []byte("-----END CERTIFICATE----- x"), 1)
+	_, err := Parse(data, testcerts.Now)
 	r, _ := ReasonOf(err)
 	assert.Equal(t, ReasonMalformedPEM, r)
 }
 
 func TestETagIgnoresOrderAndFormatting(t *testing.T) {
-	a, b := newCA(t, "a", nil), newCA(t, "b", nil)
+	a, b := testcerts.CA(t, "a", nil), testcerts.CA(t, "b", nil)
 
-	ab, err := Parse(join(a.pem(), b.pem()), now)
+	ab, err := Parse(testcerts.Join(a.PEM(), b.PEM()), testcerts.Now)
 	require.NoError(t, err)
-	ba, err := Parse(join([]byte("\n\n"), b.pem(), []byte("\r\n"), a.pem()), now)
+	ba, err := Parse(testcerts.Join([]byte("\n\n"), b.PEM(), []byte("\r\n"), a.PEM()), testcerts.Now)
 	require.NoError(t, err)
-	only, err := Parse(a.pem(), now)
+	only, err := Parse(a.PEM(), testcerts.Now)
 	require.NoError(t, err)
 
 	assert.Equal(t, ab.ETag(), ba.ETag())
@@ -134,11 +135,11 @@ func TestETagIgnoresOrderAndFormatting(t *testing.T) {
 }
 
 func TestEncodeIsCanonical(t *testing.T) {
-	a, b := newCA(t, "a", nil), newCA(t, "b", nil)
-	ba, err := Parse(join([]byte("\n"), b.pem(), []byte("\n"), a.pem()), now)
+	a, b := testcerts.CA(t, "a", nil), testcerts.CA(t, "b", nil)
+	ba, err := Parse(testcerts.Join([]byte("\n"), b.PEM(), []byte("\n"), a.PEM()), testcerts.Now)
 	require.NoError(t, err)
 
-	again, err := Parse(ba.Encode(), now)
+	again, err := Parse(ba.Encode(), testcerts.Now)
 	require.NoError(t, err)
 	assert.Equal(t, ba.Encode(), again.Encode())
 	assert.Equal(t, ba.ETag(), again.ETag())
