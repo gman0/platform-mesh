@@ -35,7 +35,7 @@ tasks:
     cmds:
       - task: tools:generate-crds
         vars:
-          BASEDIR: '{{.ROOT_DIR}}/provider-sdk'
+          BASEDIR: '{{.TASKFILE_DIR}}'
           PATH: /api/...
           OUTPUT: '{{.CRD_DIRECTORY}}'
 
@@ -45,7 +45,7 @@ tasks:
       - task: manifests
       - task: tools:generate-deepcopy
         vars:
-          BASEDIR: '{{.ROOT_DIR}}/provider-sdk'
+          BASEDIR: '{{.TASKFILE_DIR}}'
           PATH: /api/...
 
   lint:
