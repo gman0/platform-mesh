@@ -11,7 +11,7 @@
 - No Kubernetes types, no controllers, no I/O beyond what a package's purpose needs.
 
 ## Project Structure
-- `connections/v1`: version 1 of the contract: paths, ALPN names, headers, limits, reasons, messages.
+- `connections/v1`: version 1 of the contract: paths, ALPN names, headers, limits, reasons, messages, the Hello, Registration rules, HTTP helpers; `SPEC.md` is its specification, kept in step with the code.
 - `fingerprint`: `cert-sha256:` and `key-sha256:` fingerprints.
 - `credential`: Onboarding Token and Connection Secret formats, their hashes, token and Connection IDs.
 - `bundle`: the strict Pinned Bundle parser, its `etag`, and Connector Certificate checks against it.
