@@ -145,3 +145,18 @@ func TestEncodeIsCanonical(t *testing.T) {
 	assert.Equal(t, ba.ETag(), again.ETag())
 	assert.Equal(t, 2, bytes.Count(ba.Encode(), []byte("-----BEGIN CERTIFICATE-----\n")))
 }
+
+func TestParseStoredAcceptsOnlyExpired(t *testing.T) {
+	data := testcerts.Join(testcerts.CA(t, "x", nil, testcerts.Expired).PEM(), testcerts.CA(t, "y", nil, testcerts.Expired).PEM())
+	_, err := Parse(data, testcerts.Now)
+	r, _ := ReasonOf(err)
+	assert.Equal(t, ReasonAllExpired, r)
+
+	b, err := ParseStored(data)
+	require.NoError(t, err)
+	assert.Len(t, b.Certificates(), 2)
+
+	_, err = ParseStored(nil)
+	r, _ = ReasonOf(err)
+	assert.Equal(t, ReasonEmpty, r, "the other rules still apply")
+}

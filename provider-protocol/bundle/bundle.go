@@ -70,6 +70,20 @@ type Bundle struct {
 // Anything else is refused as a whole with an *Error carrying a stable
 // Reason.
 func Parse(data []byte, now time.Time) (*Bundle, error) {
+	b, err := ParseStored(data)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(b.certs, func(c *x509.Certificate) bool { return validAt(c, now) }) {
+		return nil, newError(ReasonAllExpired, -1, nil)
+	}
+	return b, nil
+}
+
+// ParseStored parses a bundle that was validated when it was received, e.g.
+// a Connection's Pinned Bundle: the same rules as Parse, except that every
+// certificate may have expired since. A push is accepted over such a bundle.
+func ParseStored(data []byte) (*Bundle, error) {
 	if len(data) > MaxSize {
 		return nil, newError(ReasonTooLarge, -1, nil)
 	}
@@ -114,9 +128,6 @@ func Parse(data []byte, now time.Time) (*Bundle, error) {
 
 	if len(certs) == 0 {
 		return nil, newError(ReasonEmpty, -1, nil)
-	}
-	if !slices.ContainsFunc(certs, func(c *x509.Certificate) bool { return validAt(c, now) }) {
-		return nil, newError(ReasonAllExpired, -1, nil)
 	}
 	return newBundle(certs), nil
 }
