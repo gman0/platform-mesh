@@ -21,17 +21,77 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Provider phases, for Local and Remote Providers alike, computed from the
+// conditions. Degraded is only reached from Ready (see status.lastReadyTime).
 const (
-	ProviderPhasePending                = "Pending"
-	ProviderPhaseProvisioningWorkspace  = "ProvisioningWorkspace"
-	ProviderPhaseProvisioningKubeconfig = "ProvisioningKubeconfig"
-	ProviderPhaseReady                  = "Ready"
-	ProviderPhaseDeleting               = "Deleting"
+	ProviderPhasePending      = "Pending"
+	ProviderPhaseProvisioning = "Provisioning"
+	ProviderPhaseReady        = "Ready"
+	ProviderPhaseDegraded     = "Degraded"
+	ProviderPhaseDeleting     = "Deleting"
 )
+
+// Provider conditions: one per reconcile step, plus the aggregate Ready.
+// ProtocolOutdated and TrustOutdated are warnings that don't affect Ready.
+const (
+	ProviderConditionReady = "Ready"
+
+	// Local Providers.
+	ProviderConditionWorkspace  = "Workspace"
+	ProviderConditionKubeconfig = "Kubeconfig"
+
+	// Remote Providers, besides Workspace.
+	ProviderConditionConnectionBinding = "ConnectionBinding"
+	ProviderConditionConnectorAccess   = "ConnectorAccess"
+	ProviderConditionRegistered        = "Registered"
+	ProviderConditionConnected         = "Connected"
+	ProviderConditionProtocolOutdated  = "ProtocolOutdated"
+	ProviderConditionTrustOutdated     = "TrustOutdated"
+)
+
+// Stable labels of Remote Provider conditions: the condition's reason, and
+// the start of its message.
+const (
+	ProviderReasonEdgeUpgradeRefused  = "EdgeUpgradeRefused"
+	ProviderReasonEdgeBotChallenge    = "EdgeBotChallenge"
+	ProviderReasonEdgePayloadBlocked  = "EdgePayloadBlocked"
+	ProviderReasonEdgeTimeout         = "EdgeTimeout"
+	ProviderReasonEdgeTLS             = "EdgeTLS"
+	ProviderReasonEdgePathRewritten   = "EdgePathRewritten"
+	ProviderReasonControlUnreachable  = "ControlUnreachable"
+	ProviderReasonSecretRejected      = "SecretRejected"
+	ProviderReasonConnectionUnknown   = "ConnectionUnknown"
+	ProviderReasonConnectionAbandoned = "ConnectionAbandoned"
+	ProviderReasonConnectionIDMissing = "ConnectionIDMissing"
+	ProviderReasonPolicyNotEnforced   = "PolicyNotEnforced"
+	ProviderReasonNoSessions          = "NoSessions"
+	ProviderReasonKcpUnreachable      = "KcpUnreachable"
+)
+
+// Annotations on a Remote Provider.
+const (
+	// AnnotationRotateConnectionSecret: every new value changes the
+	// Connection Secret once; values arriving during a change are coalesced.
+	AnnotationRotateConnectionSecret = "providers.platform-mesh.io/rotate-connection-secret"
+
+	// AnnotationAbandonConnection gives up the Connection whose connectionID
+	// it names, for a Provider that won't come back. The workspace and
+	// consumers' bindings stay.
+	AnnotationAbandonConnection = "providers.platform-mesh.io/abandon-connection"
+)
+
+// RemoteProviderServiceAccount is the admin ServiceAccount in every Remote
+// Provider's workspace, in namespace default. Connectors act as it.
+const RemoteProviderServiceAccount = "provider"
 
 // ProviderSpec defines the desired state of Provider.
 // Provider is a kcp-level resource that handles kcp-side bootstrap only
 // (Workspace, ServiceAccount, RBAC, kubeconfig Secret). It has no runtime-side effects.
+// A Remote Provider (spec.remote) is reached through a Connection instead of
+// a kubeconfig.
+//
+// +kubebuilder:validation:XValidation:rule="!has(self.remote) || (!has(self.providerKubeconfigSecret) && !has(self.hostOverride))",message="providerKubeconfigSecret and hostOverride only apply to Local Providers"
+// +kubebuilder:validation:XValidation:rule="has(oldSelf.remote) == has(self.remote)",message="a Provider can't switch between local and remote"
 type ProviderSpec struct {
 	// providerKubeconfigSecret is a Secret specification used to store
 	// the provider's kubeconfig. This is the admin kubeconfig that provider controllers
@@ -47,6 +107,23 @@ type ProviderSpec struct {
 	// front-proxy URL.
 	// +optional
 	HostOverride string `json:"hostOverride,omitempty"`
+
+	// remote makes this a Remote Provider, onboarded with a
+	// ProviderOnboardingRequest and reached through a Connection.
+	// +optional
+	Remote *RemoteProviderSpec `json:"remote,omitempty"`
+}
+
+// RemoteProviderSpec configures a Remote Provider.
+type RemoteProviderSpec struct {
+	// caBundle holds private CA certificates (PEM, one or more) that verify
+	// the outer TLS of the Provider's Base URL, instead of web PKI. To rotate,
+	// add the new CA before the Provider switches, and remove the old one
+	// afterwards.
+	// +optional
+	// +kubebuilder:validation:MaxLength=65536
+	// +kubebuilder:validation:Pattern=`^\s*-----BEGIN CERTIFICATE-----`
+	CABundle string `json:"caBundle,omitempty"`
 }
 
 // KubeconfigSecretSpec describes a Secret and the key with kubeconfig YAML content.
@@ -63,8 +140,10 @@ type KubeconfigSecretSpec struct {
 
 // ProviderStatus defines the observed state of Provider.
 type ProviderStatus struct {
-	// phase summarises the bootstrap state of the Provider (e.g. "Pending", "Ready").
+	// phase summarises the state of the Provider, computed from the
+	// conditions.
 	// +optional
+	// +kubebuilder:validation:Enum=Pending;Provisioning;Ready;Degraded;Deleting
 	Phase string `json:"phase,omitempty"`
 
 	// providerKubeconfigSecretRef points to the Secret that contains
@@ -81,13 +160,34 @@ type ProviderStatus struct {
 	// observedGeneration is the last generation reconciled by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// lastReadyTime is when the Provider was last Ready; set once it has
+	// been, so phase can tell Degraded from Provisioning.
+	// +optional
+	LastReadyTime *metav1.Time `json:"lastReadyTime,omitempty"`
+
+	// connection is the Connection a Remote Provider uses, for the Owner's
+	// information only.
+	// +optional
+	Connection *ProviderConnectionStatus `json:"connection,omitempty"`
+}
+
+// ProviderConnectionStatus shows a Remote Provider's Connection.
+type ProviderConnectionStatus struct {
+	// url is the Provider's Base URL.
+	// +optional
+	URL string `json:"url,omitempty"`
+
+	// connectionID identifies the Connection.
+	// +optional
+	ConnectionID string `json:"connectionID,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
-// +kubebuilder:printcolumn:JSONPath=".status.phase",name="Phase",type=string,description="Bootstrap phase"
-// +kubebuilder:printcolumn:JSONPath=".status.kubeconfigSecretRef.name",name="KubeconfigSecret",type=string,description="Name of the generated kubeconfig Secret"
+// +kubebuilder:printcolumn:JSONPath=".status.phase",name="Phase",type=string,description="Phase"
+// +kubebuilder:printcolumn:JSONPath=".status.providerKubeconfigSecretRef.name",name="KubeconfigSecret",type=string,description="Name of the generated kubeconfig Secret"
 // +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type=='Ready')].status",name="Ready",type=string,description="Shows if resource is ready"
 
 // Provider is the Schema for the providers API.
