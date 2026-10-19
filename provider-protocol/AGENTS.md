@@ -7,12 +7,14 @@
 - The protocol is security-relevant. Every check that refuses input is tested with negative cases, and the shared test vectors cover them.
 - Messages are forward-compatible: decoders ignore unknown fields; never reuse a field name with a different meaning.
 - Adding a field is compatible; changing or removing anything on the wire (a path, a field, a status, a reason, a limit) is a new `connections/vN` package.
+- Versioned packages hold what's negotiated per connection; persisted formats (tokens, secrets, hashes, fingerprints, bundles) carry their own version prefix and stay unversioned.
 - No Kubernetes types, no controllers, no I/O beyond what a package's purpose needs.
 
 ## Project Structure
 - `connections/v1`: version 1 of the contract: paths, ALPN names, headers, limits, reasons, messages.
 - `fingerprint`: `cert-sha256:` and `key-sha256:` fingerprints.
 - `credential`: Onboarding Token and Connection Secret formats, their hashes, token and Connection IDs.
+- `bundle`: the strict Pinned Bundle parser, its `etag`, and Connector Certificate checks against it.
 
 ## Commands
 - `task test` — run the unit tests.
