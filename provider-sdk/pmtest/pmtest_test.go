@@ -69,7 +69,7 @@ func newStandIn(t *testing.T, pm *pmtest.PM, prefix string) (*standIn, *httptest
 	require.NoError(t, err)
 	key, err := innertls.NewServerKey(k)
 	require.NoError(t, err)
-	pinned, err := bundle.Parse(pm.ConnectorCASet(), time.Now())
+	pinned, err := bundle.Parse(pm.ConnectorCASet(), tv.Now)
 	require.NoError(t, err)
 
 	s := &standIn{
@@ -160,7 +160,8 @@ func (s *standIn) serveControl(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *standIn) serveSession(w http.ResponseWriter, r *http.Request) {
-	cfg := innertls.SessionServer(s.key, func() *bundle.Bundle { return s.pinned }, []string{connectionsv1.ALPNSession}, nil)
+	// Test certificates are valid around testvectors.Now, not the real time.
+	cfg := innertls.SessionServer(s.key, func() *bundle.Bundle { return s.pinned }, []string{connectionsv1.ALPNSession}, func() time.Time { return tv.Now })
 	conn := s.upgrade(w, r, cfg)
 	if conn == nil {
 		return
@@ -214,7 +215,7 @@ func TestRegister(t *testing.T) {
 	resp, err := pm.Register(context.Background(), token(t, srv, s.tokenID, s.key.Fingerprint), req)
 	require.NoError(t, err)
 	assert.Equal(t, s.connID, resp.ConnectionID)
-	assert.Equal(t, req, <-s.register)
+	assert.Equal(t, req, recv(t, s.register))
 }
 
 func TestRegisterRefusedBeforeUpgrade(t *testing.T) {
@@ -273,8 +274,22 @@ func TestSession(t *testing.T) {
 		}))
 	}()
 
-	assert.Equal(t, hello, <-s.hello)
-	resp := <-s.stream
+	assert.Equal(t, hello, recv(t, s.hello))
+	resp := recv(t, s.stream)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "/clusters/2x8k9abc/api", resp.Header.Get("X-Path"))
+}
+
+// recv reads from ch, failing the test instead of hanging: in TLS 1.3 a
+// refused Session shows only on the Provider-side, which then sends nothing.
+func recv[T any](t *testing.T, ch <-chan T) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out: the stand-in sent nothing")
+		var zero T
+		return zero
+	}
 }
