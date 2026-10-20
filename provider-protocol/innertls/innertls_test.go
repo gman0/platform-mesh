@@ -213,7 +213,7 @@ func TestSessionReadsBundleAtHandshake(t *testing.T) {
 	pinned := func() *bundle.Bundle { return current() }
 	cert := testcerts.Leaf(t, prev).TLS()
 
-	assert.NoError(t, sessionPair(t, sk, pinned, &cert).server)
+	assert.NoError(t, sessionPair(t, sk, pinned, &cert).Server)
 	current = onlyCur // the previous CA was dropped
-	assert.Error(t, sessionPair(t, sk, pinned, &cert).server)
+	assert.Error(t, sessionPair(t, sk, pinned, &cert).Server)
 }
