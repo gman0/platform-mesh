@@ -18,6 +18,7 @@
 - `internal/connapi`: the Connection API server: routing, handshake limits, Registration, Control Sessions, Session upgrades.
 - `internal/session`: accepting Sessions (mutual Inner TLS, Hello, yamux) and the registry of live Sessions: Streams by host, status, re-checks, closing.
 - `internal/controllers`: reconcilers for the SDK's resources (`ServerKey`, `Connection`, `OnboardingToken`) and `KeyStore`, which loads Server Keys for the Inner TLS.
+- `internal/endpoint`: one `ProviderEndpoint` watch per Connection with a Session, over its Streams; applies `pendingSecretHash` and `serverKeys`.
 
 ## Commands
 - `task generate` — CRDs and deepcopy for `api/`.

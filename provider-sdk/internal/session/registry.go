@@ -89,6 +89,9 @@ type Registry struct {
 	// Grace is how long a Session that's no longer trusted may finish its
 	// in-flight requests. Default 30 seconds.
 	Grace time.Duration
+	// OnChange is called, outside the registry's lock, when a Session of a
+	// Connection is added or removed. Set it before Sessions arrive.
+	OnChange func(connectionID string)
 
 	mu       sync.Mutex
 	sessions map[string][]*Session
@@ -105,10 +108,25 @@ func (r *Registry) add(s *Session) {
 	r.mu.Lock()
 	r.sessions[s.ConnectionID] = append(r.sessions[s.ConnectionID], s)
 	r.mu.Unlock()
+	r.changed(s.ConnectionID)
 	go func() {
 		<-s.mux.CloseChan()
 		r.remove(s)
+		r.changed(s.ConnectionID)
 	}()
+}
+
+func (r *Registry) changed(connectionID string) {
+	if r.OnChange != nil {
+		r.OnChange(connectionID)
+	}
+}
+
+// Has reports whether the Connection has a live Session.
+func (r *Registry) Has(connectionID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.sessions[connectionID]) > 0
 }
 
 func (r *Registry) remove(s *Session) {
