@@ -201,7 +201,7 @@ func TestDelete(t *testing.T) {
 func TestCheckCredential(t *testing.T) {
 	c := &sdkv1alpha1.Connection{}
 	assert.False(t, CheckCredential(c, ""), "no hash, nothing matches")
-	c.Status.ProxyCredentialHash = hashOf("secret")
+	c.Status.ProxyCredentialHash = HashCredential("secret")
 	assert.True(t, CheckCredential(c, "secret"))
 	assert.False(t, CheckCredential(c, "other"))
 	assert.False(t, CheckCredential(c, ""))

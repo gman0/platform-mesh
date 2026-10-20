@@ -20,6 +20,7 @@
 - `internal/controllers`: reconcilers for the SDK's resources (`ServerKey`, `Connection`, `OnboardingToken`) and `KeyStore`, which loads Server Keys for the Inner TLS.
 - `internal/endpoint`: one `ProviderEndpoint` watch per Connection with a Session, over its Streams; applies `pendingSecretHash` and `serverKeys`.
 - `internal/kubeconfig`: the operator proxy's serving TLS (cert-manager's mounted certificate by default, a self-generated CA otherwise); the kubeconfig Secrets and proxy credentials.
+- `internal/proxy`: the operator proxy: `CONNECT` with a per-Connection credential, a Stream per tunnel, TLS inside the tunnel, first-response status sniffing, dropping unused previous credentials.
 
 ## Commands
 - `task generate` — CRDs and deepcopy for `api/`.

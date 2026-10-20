@@ -120,7 +120,7 @@ func (w *Writer) newCredential(ctx context.Context, conn *sdkv1alpha1.Connection
 		conn.Status.PreviousProxyCredentialHash = conn.Status.ProxyCredentialHash
 		conn.Status.ProxyCredentialRotation = rotation
 	}
-	conn.Status.ProxyCredentialHash = hashOf(credential)
+	conn.Status.ProxyCredentialHash = HashCredential(credential)
 	if err := w.Client.Status().Patch(ctx, conn, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{})); err != nil {
 		return "", err
 	}
@@ -175,14 +175,19 @@ func credentialIn(data []byte, connectionID string) string {
 	return p
 }
 
-func hashOf(credential string) string {
+// HashCredential is the hash of a proxy credential, as kept in the
+// Connection's status.
+func HashCredential(credential string) string {
 	sum := sha256.Sum256([]byte(credential))
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
+
+// MatchesHash reports, in constant time, whether credential has hash.
+func MatchesHash(hash, credential string) bool { return matches(hash, credential) }
 
 func matches(hash, credential string) bool {
 	if hash == "" || credential == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(hash), []byte(hashOf(credential))) == 1
+	return subtle.ConstantTimeCompare([]byte(hash), []byte(HashCredential(credential))) == 1
 }
