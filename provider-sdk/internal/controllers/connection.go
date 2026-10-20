@@ -57,6 +57,9 @@ type ConnectionReconciler struct {
 	// ReadyDelay is how long a failure lasts before Ready reports it.
 	// Default 5 minutes.
 	ReadyDelay time.Duration
+	// EnsureKubeconfig keeps the Connection's kubeconfig Secret in line
+	// with it on every reconcile. Optional.
+	EnsureKubeconfig func(ctx context.Context, c *sdkv1alpha1.Connection) error
 	// OnRemoved runs in the finalizer, e.g. to delete the kubeconfig
 	// Secret. Optional.
 	OnRemoved func(ctx context.Context, c *sdkv1alpha1.Connection) error
@@ -96,6 +99,13 @@ func (r *ConnectionReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 	}
 
 	r.checkBundle(&conn)
+	if r.EnsureKubeconfig != nil {
+		// It may patch the status itself, so it runs before the status below
+		// is computed.
+		if err := r.EnsureKubeconfig(ctx, &conn); err != nil {
+			return reconcile.Result{}, err
+		}
+	}
 
 	before := conn.DeepCopy()
 	if conn.Status.ObservedGeneration == 0 {
