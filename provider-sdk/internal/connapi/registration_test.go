@@ -156,6 +156,8 @@ func TestRegister(t *testing.T) {
 	require.NoError(t, f.client.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: resp.ConnectionID}, &conn))
 	assert.Equal(t, "alice@example.com", conn.Spec.Registration.Owner)
 	assert.Equal(t, req.ClusterName, conn.Spec.Registration.ClusterName)
+	assert.Equal(t, f.now.Add(30*time.Minute+7*24*time.Hour).UTC(), resp.UnusedExpiresAt,
+		"expiresAt plus the retry window: when the spent token is garbage-collected")
 	assert.Equal(t, resp.UnusedExpiresAt, conn.Spec.Registration.UnusedExpiresAt.UTC())
 	assert.Equal(t, req.SecretHash, conn.Status.SecretHash)
 	assert.Equal(t, []string{"sk-1"}, conn.Status.ListedServerKeys)
@@ -237,6 +239,78 @@ func TestRegisterRetiredKey(t *testing.T) {
 	var ue *pmtest.UpgradeError
 	require.ErrorAs(t, err, &ue)
 	assert.Equal(t, string(connectionsv1.TokenKeyUnusable), ue.Response.Detail)
+}
+
+func TestRegisterRetryRetiredKey(t *testing.T) {
+	f := newFixture(t)
+	tok := f.issue(30 * time.Minute)
+	first, err := f.register(tok, f.request())
+	require.NoError(t, err)
+
+	retire := metav1.NewTime(f.now.Add(time.Hour))
+	f.keyObj.Spec.RetireAt = &retire
+	require.NoError(t, f.client.Update(context.Background(), f.keyObj))
+
+	// Until the end of the retry window, retireAt doesn't matter.
+	f.now = f.now.Add(30*time.Minute + 7*24*time.Hour - time.Second)
+	resp, err := f.register(tok, f.request())
+	require.NoError(t, err)
+	assert.Equal(t, first, resp)
+}
+
+func TestRegisterKeyNotServing(t *testing.T) {
+	notReady := func(f *fixture) {
+		f.keyObj.Status.Conditions[0].Status = metav1.ConditionFalse
+		require.NoError(t, f.client.Status().Update(context.Background(), f.keyObj))
+	}
+	deleted := func(f *fixture) {
+		require.NoError(t, f.client.Delete(context.Background(), f.keyObj))
+	}
+	cases := map[string]struct {
+		spent  bool
+		change func(*fixture)
+	}{
+		"unspent, not Ready": {false, notReady},
+		"unspent, deleted":   {false, deleted},
+		"spent, not Ready":   {true, notReady},
+		"spent, deleted":     {true, deleted},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			tok := f.issue(30 * time.Minute)
+			if c.spent {
+				_, err := f.register(tok, f.request())
+				require.NoError(t, err)
+			}
+			c.change(f)
+
+			_, err := f.register(tok, f.request())
+			var ue *pmtest.UpgradeError
+			if assert.ErrorAs(t, err, &ue) && assert.NotNil(t, ue.Response) {
+				assert.Equal(t, connectionsv1.ReasonTokenRefused, ue.Response.Reason)
+				assert.Equal(t, string(connectionsv1.TokenKeyUnusable), ue.Response.Detail)
+			}
+		})
+	}
+}
+
+func TestRegisterRetryIgnoresConnectorCASet(t *testing.T) {
+	f := newFixture(t)
+	tok := f.issue(30 * time.Minute)
+	first, err := f.register(tok, f.request())
+	require.NoError(t, err)
+
+	for _, c := range tv.Bundles(t) {
+		if c.Reason == "" || len(c.PEM) == 0 {
+			continue
+		}
+		req := f.request()
+		req.ConnectorCASet = string(c.PEM)
+		resp, err := f.register(tok, req)
+		require.NoError(t, err, c.Name)
+		assert.Equal(t, first, resp, c.Name)
+	}
 }
 
 func TestRegisterWrongSecret(t *testing.T) {

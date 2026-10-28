@@ -23,6 +23,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -83,15 +84,16 @@ func (s *Server) serveRegister(w http.ResponseWriter, r *http.Request, tokenID s
 		_ = c.refuse(connectionsv1.ReasonInvalidRequest, "", 0)
 		return
 	}
+	// A retry's Connector CA Set is ignored: the first Control Call pushes
+	// the current one.
+	if tok.Status.Registration != nil {
+		s.answerRetry(c, tok, body)
+		return
+	}
 	pinned, err := bundle.Parse([]byte(body.ConnectorCASet), now)
 	if err != nil {
 		reason, _ := bundle.ReasonOf(err)
 		_ = c.refuse(connectionsv1.ReasonBundleInvalid, string(reason), 0)
-		return
-	}
-
-	if tok.Status.Registration != nil {
-		s.answerRetry(c, tok, body)
 		return
 	}
 
@@ -122,10 +124,22 @@ func (s *Server) lookupToken(ctx context.Context, tokenID string, now time.Time)
 		return nil, connectionsv1.TokenExpired
 	}
 	var key sdkv1alpha1.ServerKey
-	if err := s.cfg.Client.Get(ctx, types.NamespacedName{Namespace: s.cfg.Namespace, Name: tok.Spec.ServerKey}, &key); err != nil || !token.Usable(&key) {
+	if err := s.cfg.Client.Get(ctx, types.NamespacedName{Namespace: s.cfg.Namespace, Name: tok.Spec.ServerKey}, &key); err != nil || !keyServes(&key, tok.Status.Registration != nil) {
 		return nil, connectionsv1.TokenKeyUnusable
 	}
 	return &tok, ""
+}
+
+// keyServes reports whether a token's Server Key may serve its Registration.
+// Retiring a key stops new Registrations, not the retry of one that already
+// succeeded, so a spent token's key only needs to be present and Ready.
+func keyServes(key *sdkv1alpha1.ServerKey, spent bool) bool {
+	if !spent {
+		return token.Usable(key)
+	}
+	return key.DeletionTimestamp == nil &&
+		key.Status.Fingerprint != "" &&
+		meta.IsStatusConditionTrue(key.Status.Conditions, sdkv1alpha1.ServerKeyConditionReady)
 }
 
 func tokenSecretMatches(req *http.Request, tok *sdkv1alpha1.OnboardingToken) bool {
