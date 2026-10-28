@@ -30,6 +30,14 @@ tasks:
     cmds:
       - go build ./...
 
+  docker-build:
+    desc: Build the provider-gateway image (IMAGE= to override); the build context is the repository root.
+    dir: ..
+    vars:
+      IMAGE: '{{.IMAGE | default "ghcr.io/platform-mesh/provider-gateway:dev"}}'
+    cmds:
+      - docker build -f provider-sdk/Dockerfile -t {{.IMAGE}} .
+
   manifests:
     desc: Generate the CRDs of the SDK's kinds.
     cmds:

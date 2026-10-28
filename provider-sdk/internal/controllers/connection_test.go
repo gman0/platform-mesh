@@ -219,3 +219,22 @@ func TestConnectionGoneWithoutFinalizer(t *testing.T) {
 	require.NoError(t, f.client.Delete(context.Background(), conn))
 	f.reconcile() // closes its Sessions, without error
 }
+
+func TestConnectionKubeconfigFromFirstSession(t *testing.T) {
+	cases := map[string]struct {
+		hash   string
+		called bool
+	}{
+		"no Session yet":                 {"", false},
+		"written for an earlier Session": {"sha256:" + strings.Repeat("ef", 32), true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newConnFixture(t, func(conn *sdkv1alpha1.Connection) { conn.Status.ProxyCredentialHash = c.hash })
+			called := false
+			f.r.EnsureKubeconfig = func(context.Context, *sdkv1alpha1.Connection) error { called = true; return nil }
+			f.reconcile()
+			assert.Equal(t, c.called, called)
+		})
+	}
+}

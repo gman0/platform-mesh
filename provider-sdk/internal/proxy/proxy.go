@@ -101,8 +101,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if p.Sessions.Has(id) {
 			http.Error(w, "no Session serves this host", http.StatusNotFound)
 		} else {
-			// client-go retries.
-			http.Error(w, "no Session", http.StatusServiceUnavailable)
+			// client-go retries; the message shows in the operator's logs.
+			http.Error(w, "no Session for Connection "+id, http.StatusServiceUnavailable)
 		}
 		return
 	}

@@ -58,7 +58,7 @@ type ConnectionReconciler struct {
 	// Default 5 minutes.
 	ReadyDelay time.Duration
 	// EnsureKubeconfig keeps the Connection's kubeconfig Secret in line
-	// with it on every reconcile. Optional.
+	// with it, from its first verified Session on. Optional.
 	EnsureKubeconfig func(ctx context.Context, c *sdkv1alpha1.Connection) error
 	// OnRemoved runs in the finalizer, e.g. to delete the kubeconfig
 	// Secret. Optional.
@@ -99,7 +99,7 @@ func (r *ConnectionReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 	}
 
 	r.checkBundle(&conn)
-	if r.EnsureKubeconfig != nil {
+	if r.EnsureKubeconfig != nil && r.hadSession(&conn) {
 		// It may patch the status itself, so it runs before the status below
 		// is computed.
 		if err := r.EnsureKubeconfig(ctx, &conn); err != nil {
@@ -123,6 +123,14 @@ func (r *ConnectionReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 		}
 	}
 	return reconcile.Result{RequeueAfter: r.requeueAfter(&conn)}, nil
+}
+
+// hadSession reports whether the Connection has had a verified Session: one
+// is open, or its kubeconfig was written for an earlier one. Its kubeconfig
+// Secret exists from then on, so the operator only sees Connections that
+// have worked.
+func (r *ConnectionReconciler) hadSession(conn *sdkv1alpha1.Connection) bool {
+	return conn.Status.ProxyCredentialHash != "" || r.Sessions.Has(conn.Name)
 }
 
 func (r *ConnectionReconciler) init() {
@@ -314,7 +322,11 @@ func equalConditions(a, b []metav1.Condition) bool {
 	return true
 }
 
-// SetupWithManager watches Connections.
+// SetupWithManager watches Connections and their kubeconfig Secrets, so a
+// deleted Secret is recreated.
 func (r *ConnectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).For(&sdkv1alpha1.Connection{}).Complete(r)
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&sdkv1alpha1.Connection{}).
+		Owns(&corev1.Secret{}).
+		Complete(r)
 }
