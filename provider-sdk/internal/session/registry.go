@@ -30,6 +30,8 @@ import (
 
 	"go.platform-mesh.io/provider-protocol/bundle"
 	connectionsv1 "go.platform-mesh.io/provider-protocol/connections/v1"
+
+	"go.platform-mesh.io/provider-sdk/internal/metrics"
 )
 
 // WorkspaceHost stands for the Provider Workspace, which every Session
@@ -52,6 +54,26 @@ type Session struct {
 
 	mu       sync.Mutex
 	draining bool
+	// closeReason is why it's ending, for metrics; empty: disconnected.
+	closeReason string
+}
+
+// closing records why the Session ends, unless a reason is already known.
+func (s *Session) closing(reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closeReason == "" {
+		s.closeReason = reason
+	}
+}
+
+func (s *Session) reason() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closeReason == "" {
+		return metrics.SessionDisconnected
+	}
+	return s.closeReason
 }
 
 // serves reports whether the Session serves host.
@@ -66,13 +88,16 @@ func (s *Session) isDraining() bool {
 }
 
 // drain sends go-away and closes the Session after grace.
-func (s *Session) drain(grace time.Duration) {
+func (s *Session) drain(grace time.Duration, reason string) {
 	s.mu.Lock()
 	if s.draining {
 		s.mu.Unlock()
 		return
 	}
 	s.draining = true
+	if s.closeReason == "" {
+		s.closeReason = reason
+	}
 	s.mu.Unlock()
 	_ = s.mux.GoAway()
 	time.AfterFunc(grace, func() { _ = s.mux.Close() })
@@ -92,6 +117,8 @@ type Registry struct {
 	// OnChange is called, outside the registry's lock, when a Session of a
 	// Connection is added or removed. Set it before Sessions arrive.
 	OnChange func(connectionID string)
+	// Metrics counts closed Sessions. Optional.
+	Metrics *metrics.Metrics
 
 	mu       sync.Mutex
 	sessions map[string][]*Session
@@ -112,6 +139,7 @@ func (r *Registry) add(s *Session) {
 	go func() {
 		<-s.mux.CloseChan()
 		r.remove(s)
+		r.Metrics.SessionClosed(s.reason())
 		r.changed(s.ConnectionID)
 	}()
 }
@@ -120,6 +148,22 @@ func (r *Registry) changed(connectionID string) {
 	if r.OnChange != nil {
 		r.OnChange(connectionID)
 	}
+}
+
+// Counts returns the live Sessions: active, and draining after go-away.
+func (r *Registry) Counts() (active, draining int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, list := range r.sessions {
+		for _, s := range list {
+			if s.isDraining() {
+				draining++
+			} else {
+				active++
+			}
+		}
+	}
+	return active, draining
 }
 
 // Has reports whether the Connection has a live Session.
@@ -165,6 +209,7 @@ func (r *Registry) OpenStream(connectionID, host string) (net.Conn, error) {
 			s.mu.Lock()
 			s.draining = true
 			s.mu.Unlock()
+			s.closing(metrics.SessionGoAway)
 		}
 	}
 	return nil, ErrNoSession
@@ -177,7 +222,7 @@ func (r *Registry) Recheck(connectionID string, pinned *bundle.Bundle) int {
 	closed := 0
 	for _, s := range r.list(connectionID) {
 		if !pinned.Issued(s.Certificate) {
-			s.drain(r.Grace)
+			s.drain(r.Grace, metrics.SessionBundleRecheck)
 			closed++
 		}
 	}
@@ -187,6 +232,7 @@ func (r *Registry) Recheck(connectionID string, pinned *bundle.Bundle) int {
 // CloseConnection ends every Session of a deleted Connection at once.
 func (r *Registry) CloseConnection(connectionID string) {
 	for _, s := range r.list(connectionID) {
+		s.closing(metrics.SessionConnectionRemoved)
 		_ = s.mux.GoAway()
 		_ = s.mux.Close()
 	}

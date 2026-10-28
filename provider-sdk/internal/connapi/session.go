@@ -31,6 +31,7 @@ import (
 	"go.platform-mesh.io/provider-protocol/innertls"
 
 	sdkv1alpha1 "go.platform-mesh.io/provider-sdk/api/v1alpha1"
+	"go.platform-mesh.io/provider-sdk/internal/metrics"
 	"go.platform-mesh.io/provider-sdk/internal/session"
 )
 
@@ -39,16 +40,19 @@ import (
 func (s *Server) serveSession(w http.ResponseWriter, r *http.Request, id string) {
 	ctx := r.Context()
 	if credential.ValidateConnectionID(id) != nil {
+		s.cfg.Metrics.HandshakeRefused(metrics.EndpointSession, metrics.HandshakeUnknownConnection)
 		refuse(w, connectionsv1.ReasonConnectionUnknown, "", 0)
 		return
 	}
 	conn, known := s.connection(ctx, id)
 	if !known {
+		s.cfg.Metrics.HandshakeRefused(metrics.EndpointSession, metrics.HandshakeUnknownConnection)
 		refuse(w, connectionsv1.ReasonConnectionUnknown, "", 0)
 		return
 	}
 	release, ok := s.limiter.acquire("c/" + id)
 	if !ok {
+		s.cfg.Metrics.HandshakeRefused(metrics.EndpointSession, metrics.HandshakeLimit)
 		refuse(w, connectionsv1.ReasonUnavailable, "", connectionsv1.StandbyRetryAfter)
 		return
 	}
@@ -68,8 +72,15 @@ func (s *Server) serveSession(w http.ResponseWriter, r *http.Request, id string)
 		Timeout:      s.cfg.HandshakeTimeout,
 		Now:          s.cfg.Now,
 	})
-	if err != nil {
+	switch {
+	case err == nil:
+	case errors.Is(err, session.ErrUpgrade):
+		// Not a WebSocket upgrade: the upgrader has answered.
+	case isTimeout(err):
+		s.cfg.Metrics.HandshakeRefused(metrics.EndpointSession, metrics.HandshakeTimeout)
+	default:
 		// Logged and counted, never written anywhere.
+		s.cfg.Metrics.AuthenticationFailed(metrics.EndpointSession)
 		s.cfg.Log.V(1).Info("session refused", "connection", id, "reason", err.Error())
 	}
 }

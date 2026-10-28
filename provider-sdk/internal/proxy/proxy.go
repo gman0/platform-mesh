@@ -35,6 +35,7 @@ import (
 
 	sdkv1alpha1 "go.platform-mesh.io/provider-sdk/api/v1alpha1"
 	"go.platform-mesh.io/provider-sdk/internal/kubeconfig"
+	"go.platform-mesh.io/provider-sdk/internal/metrics"
 	"go.platform-mesh.io/provider-sdk/internal/session"
 )
 
@@ -55,6 +56,8 @@ type Proxy struct {
 	// HandshakeTimeout bounds the TLS handshake inside a tunnel. Default 10s.
 	HandshakeTimeout time.Duration
 	Log              logr.Logger
+	// Metrics counts tunnels. Optional.
+	Metrics *metrics.Metrics
 
 	// Now defaults to time.Now.
 	Now func() time.Time
@@ -71,11 +74,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	id, credential, ok := proxyAuth(r)
 	if !ok {
+		p.Metrics.TunnelRefused(metrics.TunnelCredential)
 		authRequired(w)
 		return
 	}
 	var conn sdkv1alpha1.Connection
 	if err := p.Client.Get(r.Context(), types.NamespacedName{Namespace: p.Namespace, Name: id}, &conn); err != nil || conn.DeletionTimestamp != nil {
+		p.Metrics.TunnelRefused(metrics.TunnelUnknownConnection)
 		http.Error(w, "unknown Connection", http.StatusNotFound)
 		return
 	}
@@ -84,6 +89,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case kubeconfig.MatchesHash(conn.Status.PreviousProxyCredentialHash, credential):
 		p.usedPrevious(id)
 	default:
+		p.Metrics.TunnelRefused(metrics.TunnelCredential)
 		authRequired(w)
 		return
 	}
@@ -99,9 +105,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if p.Sessions.Has(id) {
+			p.Metrics.TunnelRefused(metrics.TunnelUnknownHost)
 			http.Error(w, "no Session serves this host", http.StatusNotFound)
 		} else {
 			// client-go retries; the message shows in the operator's logs.
+			p.Metrics.TunnelRefused(metrics.TunnelNoSession)
 			http.Error(w, "no Session for Connection "+id, http.StatusServiceUnavailable)
 		}
 		return
@@ -128,6 +136,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) tunnel(raw net.Conn, w io.Writer, stream net.Conn, id, host string) {
 	defer raw.Close()
 	defer stream.Close()
+	p.Metrics.TunnelOpened()
+	defer p.Metrics.TunnelClosed()
 	if _, err := io.WriteString(w, "HTTP/1.1 200 Connection established\r\n\r\n"); err != nil {
 		return
 	}

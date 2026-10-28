@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	sdkv1alpha1 "go.platform-mesh.io/provider-sdk/api/v1alpha1"
@@ -47,6 +48,7 @@ import (
 	"go.platform-mesh.io/provider-sdk/internal/controllers"
 	"go.platform-mesh.io/provider-sdk/internal/endpoint"
 	"go.platform-mesh.io/provider-sdk/internal/kubeconfig"
+	"go.platform-mesh.io/provider-sdk/internal/metrics"
 	"go.platform-mesh.io/provider-sdk/internal/proxy"
 	"go.platform-mesh.io/provider-sdk/internal/session"
 )
@@ -98,7 +100,15 @@ func Run(ctx context.Context, cfg *rest.Config, o Options) error {
 	}
 
 	c := mgr.GetClient()
+	m, err := metrics.New(ctrlmetrics.Registry)
+	if err != nil {
+		return err
+	}
 	registry := session.NewRegistry()
+	registry.Metrics = m
+	if err := ctrlmetrics.Registry.Register(&metrics.State{Client: c, Namespace: o.Namespace, Sessions: registry.Counts}); err != nil {
+		return err
+	}
 	recorder := mgr.GetEventRecorderFor("provider-gateway")
 	writer := &kubeconfig.Writer{
 		Client:     c,
@@ -139,6 +149,7 @@ func Run(ctx context.Context, cfg *rest.Config, o Options) error {
 		Sessions:    registry,
 		RetryWindow: o.RetryWindow,
 		IsLeader:    isLeader,
+		Metrics:     m,
 		Log:         log.WithName("connection-api"),
 	})
 	apiTLS, err := o.connectionAPITLS(mgr)
@@ -152,6 +163,7 @@ func Run(ctx context.Context, cfg *rest.Config, o Options) error {
 		Sessions:  registry,
 		TLS:       servingTLS,
 		Log:       log.WithName("proxy"),
+		Metrics:   m,
 	}
 
 	// Runnables without NeedLeaderElection run on the elected replica only.

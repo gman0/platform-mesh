@@ -23,28 +23,42 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
 
 	connectionsv1 "go.platform-mesh.io/provider-protocol/connections/v1"
 	"go.platform-mesh.io/provider-protocol/wsconn"
+
+	"go.platform-mesh.io/provider-sdk/internal/metrics"
 )
 
 // accept upgrades to a WebSocket and runs the Inner TLS server with cfg,
-// within timeout. It returns nil after answering or closing on failure.
-func accept(w http.ResponseWriter, r *http.Request, cfg *tls.Config, timeout time.Duration) *tls.Conn {
+// within the handshake timeout. It returns nil after answering or closing
+// on failure, and counts a failed handshake on endpoint.
+func (s *Server) accept(w http.ResponseWriter, r *http.Request, cfg *tls.Config, endpoint string) *tls.Conn {
 	ws, err := wsconn.Upgrader().Upgrade(w, r, nil)
 	if err != nil {
 		return nil // the upgrader has answered
 	}
 	conn := tls.Server(wsconn.New(ws, wsconn.Options{}), cfg)
-	_ = conn.SetDeadline(time.Now().Add(timeout))
+	_ = conn.SetDeadline(time.Now().Add(s.cfg.HandshakeTimeout))
 	if err := conn.Handshake(); err != nil {
 		_ = conn.Close()
+		reason := metrics.HandshakeTLS
+		if isTimeout(err) {
+			reason = metrics.HandshakeTimeout
+		}
+		s.cfg.Metrics.HandshakeRefused(endpoint, reason)
 		return nil
 	}
 	return conn
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 // innerConn reads requests and writes responses inside the Inner TLS, over

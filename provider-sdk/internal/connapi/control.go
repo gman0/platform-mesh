@@ -37,6 +37,7 @@ import (
 	"go.platform-mesh.io/provider-protocol/innertls"
 
 	sdkv1alpha1 "go.platform-mesh.io/provider-sdk/api/v1alpha1"
+	"go.platform-mesh.io/provider-sdk/internal/metrics"
 )
 
 const (
@@ -63,6 +64,11 @@ func (s *Server) serveControl(w http.ResponseWriter, r *http.Request, id string)
 		release, ok = s.unknown.acquire()
 	}
 	if !ok {
+		limit := metrics.HandshakeLimit
+		if !known {
+			limit = metrics.HandshakeUnknownLimit
+		}
+		s.cfg.Metrics.HandshakeRefused(metrics.EndpointControl, limit)
 		refuse(w, connectionsv1.ReasonUnavailable, "", connectionsv1.StandbyRetryAfter)
 		return
 	}
@@ -75,7 +81,7 @@ func (s *Server) serveControl(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 
-	tc := accept(w, r, innertls.Server(key, []string{connectionsv1.ALPNControl}), s.cfg.HandshakeTimeout)
+	tc := s.accept(w, r, innertls.Server(key, []string{connectionsv1.ALPNControl}), metrics.EndpointControl)
 	if tc == nil {
 		return
 	}
@@ -108,6 +114,7 @@ func (s *Server) controlCall(ctx context.Context, c *innerConn, req *http.Reques
 		return true
 	}
 	if target != id {
+		s.cfg.Metrics.ConnectionMismatch()
 		_ = c.refuse(connectionsv1.ReasonConnectionMismatch, "", 0)
 		return false
 	}
@@ -130,6 +137,7 @@ func (s *Server) controlCall(ctx context.Context, c *innerConn, req *http.Reques
 	// The first failed authentication closes the Control Session, and
 	// changes nothing.
 	if !secretMatches(req, &conn) {
+		s.cfg.Metrics.AuthenticationFailed(metrics.EndpointControl)
 		_ = c.refuse(connectionsv1.ReasonUnauthorized, "", 0)
 		return false
 	}
@@ -214,16 +222,19 @@ func (s *Server) putConnectorCASet(ctx context.Context, c *innerConn, req *http.
 	}
 	// Compare-and-swap: a missing or stale If-Match gets the current etag.
 	if etag, err := connectionsv1.ParseIfMatch(req.Header.Get("If-Match")); err != nil || etag != current.ETag() {
+		s.cfg.Metrics.PushRefused(string(connectionsv1.ReasonPreconditionFailed), "")
 		return c.writeError(connectionsv1.ErrorResponse{Reason: connectionsv1.ReasonPreconditionFailed, ETag: current.ETag()}) == nil
 	}
 	var body connectionsv1.ConnectorCASetUpdate
 	if err := connectionsv1.ReadJSON(req.Body, connectionsv1.MaxBodySize, &body); err != nil {
+		s.cfg.Metrics.PushRefused(string(connectionsv1.ReasonInvalidRequest), "")
 		_ = c.refuse(connectionsv1.ReasonInvalidRequest, "", 0)
 		return true
 	}
 	next, err := bundle.Parse([]byte(body.ConnectorCASet), s.cfg.Now())
 	if err != nil {
 		reason, _ := bundle.ReasonOf(err)
+		s.cfg.Metrics.PushRefused(string(connectionsv1.ReasonBundleInvalid), string(reason))
 		_ = c.refuse(connectionsv1.ReasonBundleInvalid, string(reason), 0)
 		return true
 	}
@@ -235,6 +246,7 @@ func (s *Server) putConnectorCASet(ctx context.Context, c *innerConn, req *http.
 	conn.Spec.PinnedBundle = string(next.Encode())
 	if err := s.cfg.Client.Update(ctx, conn); err != nil {
 		if apierrors.IsConflict(err) {
+			s.cfg.Metrics.PushRefused(string(connectionsv1.ReasonPreconditionFailed), "")
 			return c.writeError(connectionsv1.ErrorResponse{Reason: connectionsv1.ReasonPreconditionFailed, ETag: current.ETag()}) == nil
 		}
 		_ = c.refuse(connectionsv1.ReasonUnavailable, "", connectionsv1.StandbyRetryAfter)

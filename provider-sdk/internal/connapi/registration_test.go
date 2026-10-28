@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,6 +45,7 @@ import (
 	tv "go.platform-mesh.io/provider-protocol/testvectors"
 
 	sdkv1alpha1 "go.platform-mesh.io/provider-sdk/api/v1alpha1"
+	"go.platform-mesh.io/provider-sdk/internal/metrics/metricstest"
 	"go.platform-mesh.io/provider-sdk/internal/session"
 	"go.platform-mesh.io/provider-sdk/pmtest"
 )
@@ -63,6 +65,8 @@ type fixture struct {
 	sessions *session.Registry
 	now      time.Time
 	leader bool
+	// reg holds the server's metrics.
+	reg *prometheus.Registry
 }
 
 type keys map[string]innertls.ServerKey
@@ -100,7 +104,11 @@ func newFixture(t *testing.T) *fixture {
 		WithObjects(keyObj).Build()
 
 	f := &fixture{t: t, client: c, key: key, keyObj: keyObj, pm: pmtest.New(t), sessions: session.NewRegistry(), now: tv.Now, leader: true}
+	m, reg := metricstest.New(t)
+	f.reg = reg
+	f.sessions.Metrics = m
 	f.server = New(Config{
+		Metrics:   m,
 		Client:    c,
 		Namespace: ns,
 		Keys:      keys{"sk-1": key},
@@ -132,6 +140,12 @@ func (f *fixture) issue(expiresIn time.Duration) credential.OnboardingToken {
 		},
 	}))
 	return tok
+}
+
+// metric returns a metric of the server, see metricstest.Value.
+func (f *fixture) metric(name string, labels ...string) float64 {
+	f.t.Helper()
+	return metricstest.Value(f.t, f.reg, name, labels...)
 }
 
 func (f *fixture) register(tok credential.OnboardingToken, req connectionsv1.RegistrationRequest) (*connectionsv1.RegistrationResponse, error) {

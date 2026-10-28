@@ -31,6 +31,7 @@ import (
 	"go.platform-mesh.io/provider-protocol/innertls"
 
 	sdkv1alpha1 "go.platform-mesh.io/provider-sdk/api/v1alpha1"
+	"go.platform-mesh.io/provider-sdk/internal/metrics"
 	"go.platform-mesh.io/provider-sdk/internal/session"
 )
 
@@ -72,6 +73,9 @@ type Config struct {
 	// OnRegistered runs after a new Connection is created and its token
 	// spent, e.g. to write its kubeconfig Secret. Optional.
 	OnRegistered func(ctx context.Context, c *sdkv1alpha1.Connection) error
+
+	// Metrics counts refusals and failed authentications. Optional.
+	Metrics *metrics.Metrics
 
 	// Now defaults to time.Now.
 	Now func() time.Time

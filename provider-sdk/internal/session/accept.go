@@ -18,6 +18,7 @@ package session
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +31,10 @@ import (
 	"go.platform-mesh.io/provider-protocol/innertls"
 	"go.platform-mesh.io/provider-protocol/wsconn"
 )
+
+// ErrUpgrade wraps Accept's error when the request wasn't a valid WebSocket
+// upgrade; the upgrader has answered it.
+var ErrUpgrade = errors.New("websocket upgrade")
 
 // Accept is what accepting a Session needs from the Connection.
 type Accept struct {
@@ -55,7 +60,7 @@ type Accept struct {
 func (r *Registry) Accept(w http.ResponseWriter, req *http.Request, a Accept) error {
 	ws, err := wsconn.Upgrader().Upgrade(w, req, nil)
 	if err != nil {
-		return err // the upgrader has answered
+		return fmt.Errorf("%w: %w", ErrUpgrade, err)
 	}
 	conn := tls.Server(wsconn.New(ws, wsconn.Options{}),
 		innertls.SessionServer(a.Key, a.Pinned, []string{connectionsv1.ALPNSession}, a.Now))

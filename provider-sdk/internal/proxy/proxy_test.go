@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,6 +46,8 @@ import (
 
 	sdkv1alpha1 "go.platform-mesh.io/provider-sdk/api/v1alpha1"
 	"go.platform-mesh.io/provider-sdk/internal/kubeconfig"
+	"go.platform-mesh.io/provider-sdk/internal/metrics"
+	"go.platform-mesh.io/provider-sdk/internal/metrics/metricstest"
 	"go.platform-mesh.io/provider-sdk/internal/session"
 )
 
@@ -141,6 +144,7 @@ type fixture struct {
 	srv      *httptest.Server
 	bundle   []byte
 	now      time.Time
+	reg      *prometheus.Registry
 }
 
 func newFixture(t *testing.T, sessions *fakeSessions) *fixture {
@@ -161,8 +165,9 @@ func newFixture(t *testing.T, sessions *fakeSessions) *fixture {
 	require.NoError(t, err)
 	src := &kubeconfig.SelfSigned{CA: ca, Names: []string{gatewayName}}
 
-	f := &fixture{t: t, client: c, sessions: sessions, bundle: ca.Bundle(), now: time.Now()}
-	f.proxy = &Proxy{Client: c, Namespace: ns, Sessions: sessions, TLS: src, Log: logr.Discard(), Now: func() time.Time { return f.now }}
+	m, reg := metricstest.New(t)
+	f := &fixture{t: t, client: c, sessions: sessions, bundle: ca.Bundle(), now: time.Now(), reg: reg}
+	f.proxy = &Proxy{Client: c, Namespace: ns, Sessions: sessions, TLS: src, Log: logr.Discard(), Metrics: m, Now: func() time.Time { return f.now }}
 	f.srv = httptest.NewUnstartedServer(f.proxy)
 	f.srv.TLS = &tls.Config{GetCertificate: src.GetCertificate}
 	f.srv.StartTLS()
@@ -255,12 +260,41 @@ func TestConnectRefusals(t *testing.T) {
 	for name, c := range cases {
 		assert.Equal(t, c.want, f.connect(c.auth, c.target), name)
 	}
+
+	refused := func(reason string) float64 {
+		return metricstest.Value(t, f.reg, "providersdk_operator_tunnels_refused_total", "reason", reason)
+	}
+	assert.Equal(t, 2.0, refused(metrics.TunnelCredential))
+	assert.Equal(t, 1.0, refused(metrics.TunnelUnknownConnection))
+	assert.Equal(t, 1.0, refused(metrics.TunnelUnknownHost))
+	assert.Equal(t, 0.0, refused(metrics.TunnelNoSession))
 }
 
 func TestConnectWithoutSessions(t *testing.T) {
 	f := newFixture(t, newFakeSessions(t))
 	f.sessions.hosts = nil
 	assert.Equal(t, http.StatusServiceUnavailable, f.connect(connID+":"+credential, "front-proxy.pm.invalid:443"))
+	assert.Equal(t, 1.0, metricstest.Value(t, f.reg, "providersdk_operator_tunnels_refused_total", "reason", metrics.TunnelNoSession))
+}
+
+func TestTunnelsOpenGauge(t *testing.T) {
+	f := newFixture(t, newFakeSessions(t))
+	open := func() float64 { return metricstest.Value(t, f.reg, "providersdk_operator_tunnels") }
+
+	pool := x509.NewCertPool()
+	require.True(t, pool.AppendCertsFromPEM(f.bundle))
+	conn, err := tls.Dial("tcp", f.srv.Listener.Addr().String(), &tls.Config{RootCAs: pool, ServerName: gatewayName})
+	require.NoError(t, err)
+	auth := base64.StdEncoding.EncodeToString([]byte(connID + ":" + credential))
+	_, err = io.WriteString(conn, "CONNECT front-proxy.pm.invalid:443 HTTP/1.1\r\nHost: front-proxy.pm.invalid:443\r\nProxy-Authorization: Basic "+auth+"\r\n\r\n")
+	require.NoError(t, err)
+	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodConnect})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, 1.0, open(), "counted before the 200")
+
+	require.NoError(t, conn.Close())
+	require.Eventually(t, func() bool { return open() == 0 }, 5*time.Second, 10*time.Millisecond)
 }
 
 func TestPreviousCredential(t *testing.T) {

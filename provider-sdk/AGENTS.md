@@ -20,6 +20,7 @@
 - `internal/controllers`: reconcilers for the SDK's resources (`ServerKey`, `Connection`, `OnboardingToken`) and `KeyStore`, which loads Server Keys for the Inner TLS.
 - `internal/endpoint`: one `ProviderEndpoint` watch per Connection with a Session, over its Streams; applies `pendingSecretHash` and `serverKeys`.
 - `internal/kubeconfig`: the operator proxy's serving TLS (cert-manager's mounted certificate by default, a self-generated CA otherwise); the kubeconfig Secrets and proxy credentials.
+- `internal/metrics`: Prometheus metrics: nil-safe event counters passed into `connapi`, `session` and `proxy`, and `State`, gauges read at scrape time. No `connectionID` labels. `metricstest` reads them in tests.
 - `internal/gateway`: wires `provider-gateway`: options, one controller-runtime manager, the listeners; the Connection API on every replica, everything else on the elected one.
 - `cmd/provider-gateway`: flags (or `PROVIDER_GATEWAY_*` env) into `gateway.Run`.
 - `internal/proxy`: the operator proxy: `CONNECT` with a per-Connection credential, a Stream per tunnel, TLS inside the tunnel, first-response status sniffing, dropping unused previous credentials.

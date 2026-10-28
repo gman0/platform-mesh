@@ -33,6 +33,7 @@ import (
 	"go.platform-mesh.io/provider-protocol/innertls"
 
 	sdkv1alpha1 "go.platform-mesh.io/provider-sdk/api/v1alpha1"
+	"go.platform-mesh.io/provider-sdk/internal/metrics"
 	"go.platform-mesh.io/provider-sdk/token"
 )
 
@@ -44,6 +45,7 @@ func (s *Server) serveRegister(w http.ResponseWriter, r *http.Request, tokenID s
 	// Before the upgrade: the token, and its Server Key.
 	tok, refusal := s.lookupToken(ctx, tokenID, now)
 	if refusal != "" {
+		s.cfg.Metrics.RegistrationRefused(string(refusal))
 		refuse(w, connectionsv1.ReasonTokenRefused, string(refusal), 0)
 		return
 	}
@@ -55,12 +57,13 @@ func (s *Server) serveRegister(w http.ResponseWriter, r *http.Request, tokenID s
 	}
 	release, ok := s.limiter.acquire("t/" + tokenID)
 	if !ok {
+		s.cfg.Metrics.HandshakeRefused(metrics.EndpointRegister, metrics.HandshakeLimit)
 		refuse(w, connectionsv1.ReasonUnavailable, "", connectionsv1.StandbyRetryAfter)
 		return
 	}
 	defer release()
 
-	conn := accept(w, r, innertls.Server(key, []string{connectionsv1.ALPNRegister}), s.cfg.HandshakeTimeout)
+	conn := s.accept(w, r, innertls.Server(key, []string{connectionsv1.ALPNRegister}), metrics.EndpointRegister)
 	if conn == nil {
 		return
 	}
@@ -76,11 +79,13 @@ func (s *Server) serveRegister(w http.ResponseWriter, r *http.Request, tokenID s
 		return
 	}
 	if !tokenSecretMatches(req, tok) {
+		s.cfg.Metrics.RegistrationRefused(string(connectionsv1.ReasonUnauthorized))
 		_ = c.refuse(connectionsv1.ReasonUnauthorized, "", 0)
 		return
 	}
 	var body connectionsv1.RegistrationRequest
 	if err := connectionsv1.ReadJSON(req.Body, connectionsv1.MaxBodySize, &body); err != nil || body.Validate() != nil {
+		s.cfg.Metrics.RegistrationRefused(string(connectionsv1.ReasonInvalidRequest))
 		_ = c.refuse(connectionsv1.ReasonInvalidRequest, "", 0)
 		return
 	}
@@ -93,6 +98,7 @@ func (s *Server) serveRegister(w http.ResponseWriter, r *http.Request, tokenID s
 	pinned, err := bundle.Parse([]byte(body.ConnectorCASet), now)
 	if err != nil {
 		reason, _ := bundle.ReasonOf(err)
+		s.cfg.Metrics.RegistrationRefused(string(connectionsv1.ReasonBundleInvalid))
 		_ = c.refuse(connectionsv1.ReasonBundleInvalid, string(reason), 0)
 		return
 	}
@@ -164,8 +170,10 @@ func (s *Server) answerRetry(c *innerConn, tok *sdkv1alpha1.OnboardingToken, bod
 	case "":
 		_ = c.respond(http.StatusCreated, s.response(tok, reg.ConnectionID, reg.ServerKeys))
 	case connectionsv1.ReasonIdempotencyConflict:
+		s.cfg.Metrics.RegistrationRefused(string(connectionsv1.ReasonIdempotencyConflict))
 		_ = c.refuse(connectionsv1.ReasonIdempotencyConflict, "", 0)
 	default:
+		s.cfg.Metrics.RegistrationRefused(string(connectionsv1.TokenSpent))
 		_ = c.refuse(connectionsv1.ReasonTokenRefused, string(connectionsv1.TokenSpent), 0)
 	}
 }
