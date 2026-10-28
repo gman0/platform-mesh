@@ -166,6 +166,20 @@ func (r *Registry) Counts() (active, draining int) {
 	return active, draining
 }
 
+// Count is the number of the Connection's Sessions serving host, not
+// counting those draining after go-away.
+func (r *Registry) Count(connectionID, host string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, s := range r.sessions[connectionID] {
+		if s.serves(host) && !s.isDraining() {
+			n++
+		}
+	}
+	return n
+}
+
 // Has reports whether the Connection has a live Session.
 func (r *Registry) Has(connectionID string) bool {
 	r.mu.Lock()

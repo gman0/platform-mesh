@@ -14,6 +14,7 @@
 - `api/v1alpha1`: `Connection`, `OnboardingToken`, `ServerKey` (`provider-sdk.platform-mesh.io`).
 - `config/crd/bases`: generated CRDs.
 - `pmtest`: a fake PM-side for tests: Registration, Control Sessions, Sessions.
+- `providertest`: a Provider-side for PM-side tests (`platform-mesh-operator`, Connector): the real Connection API and Session registry over a fake cluster, behind a TLS stand-in for the Edge; `ControlScenarios`, runnable vectors for a PM-side Control client.
 - `token`: Onboarding Tokens for portals: `PickServerKey`, `New`, `Issue`.
 - `internal/connapi`: the Connection API server: routing, handshake limits, Registration, Control Sessions, Session upgrades.
 - `internal/session`: accepting Sessions (mutual Inner TLS, Hello, yamux) and the registry of live Sessions: Streams by host, status, re-checks, closing.
