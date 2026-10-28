@@ -302,7 +302,13 @@ tasks:
         fi
 
         version='{{.VERSION}}'
-        image='{{.REGISTRY}}/{{.REPO}}'/"$comp"
+        # The image is named after the component, except where the component
+        # builds a binary of another name.
+        name="$comp"
+        case "$comp" in
+          provider-sdk) name=provider-gateway ;;
+        esac
+        image='{{.REGISTRY}}/{{.REPO}}'/"$name"
 
         # Build context is the repo ROOT: the operator Dockerfiles use the shared
         # go.work + apis module, so they COPY root-relative paths. A self-contained

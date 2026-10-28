@@ -1,0 +1,161 @@
+# Copyright The Platform Mesh Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: onboardingtokens.provider-sdk.platform-mesh.io
+spec:
+  group: provider-sdk.platform-mesh.io
+  names:
+    kind: OnboardingToken
+    listKind: OnboardingTokenList
+    plural: onboardingtokens
+    singular: onboardingtoken
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.owner
+      name: Owner
+      type: string
+    - jsonPath: .spec.expiresAt
+      name: Expires
+      type: date
+    - description: Set once spent
+      jsonPath: .status.registration.connectionID
+      name: Connection
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          OnboardingToken is a single-use token a Provider's portal issued, named by
+          its token ID. provider-gateway garbage-collects it: unspent at expiresAt,
+          spent once the retry window has passed.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the token
+            properties:
+              expiresAt:
+                description: expiresAt is when the token can no longer start a Registration.
+                format: date-time
+                type: string
+              owner:
+                description: |-
+                  owner is the portal account the token is issued to; it owns the
+                  Connection the token registers.
+                maxLength: 253
+                minLength: 1
+                type: string
+              serverKey:
+                description: |-
+                  serverKey names the ServerKey whose fingerprint the token carries;
+                  Registration runs inside Inner TLS with it.
+                maxLength: 253
+                minLength: 1
+                type: string
+              tokenHash:
+                description: |-
+                  tokenHash is the hash of the token secret. The token itself is never
+                  stored.
+                pattern: ^sha256:[0-9a-f]{64}$
+                type: string
+            required:
+            - expiresAt
+            - owner
+            - serverKey
+            - tokenHash
+            type: object
+            x-kubernetes-validations:
+            - message: spec is immutable
+              rule: self == oldSelf
+          status:
+            description: status records its Registration
+            properties:
+              registration:
+                description: registration is set when the token is spent, by compare-and-swap.
+                properties:
+                  at:
+                    description: |-
+                      at is when the token was spent; retries are honoured for the retry
+                      window after it.
+                    format: date-time
+                    type: string
+                  clusterName:
+                    pattern: ^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$
+                    type: string
+                  connectionID:
+                    description: connectionID is the Connection the token registered.
+                    pattern: ^c-[a-z2-7]{26}$
+                    type: string
+                  idempotencyKey:
+                    description: |-
+                      idempotencyKey, secretHash and clusterName identify the request; a
+                      retry must match all three.
+                    maxLength: 128
+                    minLength: 1
+                    type: string
+                  secretHash:
+                    pattern: ^sha256:[0-9a-f]{64}$
+                    type: string
+                  serverKeys:
+                    description: serverKeys are the Server Keys returned, as PEM SubjectPublicKeyInfo.
+                    items:
+                      type: string
+                    maxItems: 8
+                    type: array
+                    x-kubernetes-list-type: atomic
+                required:
+                - at
+                - clusterName
+                - connectionID
+                - idempotencyKey
+                - secretHash
+                - serverKeys
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: the name must be a token ID
+          rule: self.metadata.name.matches('^t-[a-z2-7]{26}$')
+    selectableFields:
+    - jsonPath: .spec.owner
+    served: true
+    storage: true
+    subresources:
+      status: {}

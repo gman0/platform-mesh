@@ -48,7 +48,10 @@ func SecretName(connectionID string) string { return "connection-" + connectionI
 
 // Writer writes the kubeconfig Secrets.
 type Writer struct {
-	Client    client.Client
+	Client client.Client
+	// Namespace holds the kubeconfig Secrets: a namespace of their own, so
+	// the Provider's operator can read them without reading the Server Keys'
+	// and CAs' Secrets.
 	Namespace string
 	// Source provides the trust bundle the kubeconfigs carry.
 	Source Source
@@ -102,6 +105,11 @@ func (w *Writer) Ensure(ctx context.Context, conn *sdkv1alpha1.Connection) error
 		metav1.SetMetaDataLabel(&secret.ObjectMeta, "app.kubernetes.io/managed-by", "provider-gateway")
 		metav1.SetMetaDataAnnotation(&secret.ObjectMeta, sdkv1alpha1.ClusterNameAnnotation, conn.Spec.Registration.ClusterName)
 		secret.Data = map[string][]byte{sdkv1alpha1.KubeconfigKey: data}
+		if conn.Namespace != w.Namespace {
+			// Owner references can't cross namespaces: the Connection's
+			// finalizer deletes the Secret instead.
+			return nil
+		}
 		return controllerutil.SetControllerReference(conn, &secret, w.Client.Scheme())
 	})
 	return err

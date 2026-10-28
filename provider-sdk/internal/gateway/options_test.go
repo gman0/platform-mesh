@@ -50,9 +50,21 @@ func TestOptionsProxyHost(t *testing.T) {
 	assert.Equal(t, "gw.example:443", o.ProxyHost, "an explicit one is kept")
 }
 
+func TestOptionsKubeconfigNamespace(t *testing.T) {
+	o := validOptions()
+	require.NoError(t, o.Complete())
+	assert.Equal(t, o.Namespace, o.KubeconfigNamespace, "defaults to the namespace")
+
+	o = validOptions()
+	o.KubeconfigNamespace = "wild-west-kubeconfigs"
+	require.NoError(t, o.Complete())
+	assert.Equal(t, "wild-west-kubeconfigs", o.KubeconfigNamespace)
+}
+
 func TestOptionsInvalid(t *testing.T) {
 	cases := map[string]func(*Options){
 		"no namespace":                     func(o *Options) { o.Namespace = "" },
+		"invalid kubeconfig namespace":     func(o *Options) { o.KubeconfigNamespace = "Kube_Configs" },
 		"bad connection API address":       func(o *Options) { o.ConnectionAPIAddress = "8080" },
 		"bad proxy address":                func(o *Options) { o.ProxyAddress = "3128" },
 		"unknown serving TLS":              func(o *Options) { o.ServingTLS = "vault" },

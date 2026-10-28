@@ -1,6 +1,6 @@
 ## Repository Description
 - `provider-sdk` lets a service provider offer its APIs on any number of Platform Mesh instances, which reach it from outside and hand it no credentials of theirs.
-- It builds `provider-gateway` (image; chart in `pm-helm-charts`), the Provider-side of the Connection API, and holds a token helper for portals and test support.
+- It builds `provider-gateway` (image; chart in `../provider-gateway-chart`, CRDs in `../provider-gateway-crds-chart`, kept in step by `task generate`), the Provider-side of the Connection API, and holds a token helper for portals and test support.
 - The wire contract is in `provider-protocol`; this module implements it and adds nothing to it.
 - Read the org-wide [AGENTS.md](https://github.com/platform-mesh/.github/blob/main/AGENTS.md) for general conventions.
 

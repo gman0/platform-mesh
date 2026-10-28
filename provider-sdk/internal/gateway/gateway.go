@@ -79,7 +79,13 @@ func Run(ctx context.Context, cfg *rest.Config, o Options) error {
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                        scheme,
-		Cache:                         cache.Options{DefaultNamespaces: map[string]cache.Config{o.Namespace: {}}},
+		Cache: cache.Options{
+			DefaultNamespaces: map[string]cache.Config{o.Namespace: {}},
+			// Secrets also in the kubeconfig namespace, to recreate deleted ones.
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Secret{}: {Namespaces: map[string]cache.Config{o.Namespace: {}, o.KubeconfigNamespace: {}}},
+			},
+		},
 		Metrics:                       metricsserver.Options{BindAddress: o.MetricsAddress},
 		HealthProbeBindAddress:        o.HealthAddress,
 		LeaderElection:                o.LeaderElection,
@@ -112,7 +118,7 @@ func Run(ctx context.Context, cfg *rest.Config, o Options) error {
 	recorder := mgr.GetEventRecorderFor("provider-gateway")
 	writer := &kubeconfig.Writer{
 		Client:     c,
-		Namespace:  o.Namespace,
+		Namespace:  o.KubeconfigNamespace,
 		Source:     servingTLS,
 		ProxyHost:  o.ProxyHost,
 		ServerName: o.Names[0],
@@ -125,6 +131,7 @@ func Run(ctx context.Context, cfg *rest.Config, o Options) error {
 	}
 	if err := (&controllers.ConnectionReconciler{
 		Client:           c,
+		Namespace:        o.Namespace,
 		APIReader:        mgr.GetAPIReader(),
 		Sessions:         registry,
 		Recorder:         recorder,
@@ -205,7 +212,7 @@ func Run(ctx context.Context, cfg *rest.Config, o Options) error {
 		return err
 	}
 
-	log.Info("starting", "namespace", o.Namespace, "servingTLS", o.ServingTLS, "proxyHost", o.ProxyHost)
+	log.Info("starting", "namespace", o.Namespace, "kubeconfigNamespace", o.KubeconfigNamespace, "servingTLS", o.ServingTLS, "proxyHost", o.ProxyHost)
 	return mgr.Start(ctx)
 }
 

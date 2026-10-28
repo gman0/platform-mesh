@@ -1,0 +1,65 @@
+# Copyright The Platform Mesh Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# The Connection API: the Provider's Edge routes the Base URL here.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "provider-gateway.name" . }}
+  labels:
+    {{- include "provider-gateway.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  publishNotReadyAddresses: {{ .Values.connectionAPI.publishNotReadyAddresses }}
+  selector:
+    {{- include "provider-gateway.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: connection-api
+      port: {{ .Values.connectionAPI.port }}
+      targetPort: connection-api
+---
+# The operator proxy: the kubeconfig Secrets' proxy-url. Only the active replica is
+# ready, so only it gets traffic.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "provider-gateway.proxyServiceName" . }}
+  labels:
+    {{- include "provider-gateway.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "provider-gateway.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: operator-proxy
+      port: {{ .Values.operatorProxy.port }}
+      targetPort: operator-proxy
+---
+# Metrics, from every replica.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "provider-gateway.name" . }}-metrics
+  labels:
+    {{- include "provider-gateway.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "provider-gateway.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics

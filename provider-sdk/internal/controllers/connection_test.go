@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -237,4 +238,19 @@ func TestConnectionKubeconfigFromFirstSession(t *testing.T) {
 			assert.Equal(t, c.called, called)
 		})
 	}
+}
+
+func TestConnectionKubeconfigSecretMapsToConnection(t *testing.T) {
+	f := newConnFixture(t)
+	f.r.Namespace = ns
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
+		Name: "connection-" + connID, Namespace: "wild-west-kubeconfigs",
+		Labels: map[string]string{sdkv1alpha1.ConnectionLabel: connID},
+	}}
+	assert.Equal(t,
+		[]reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: ns, Name: connID}}},
+		f.r.secretToConnection(context.Background(), secret))
+
+	other := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "sk-1", Namespace: ns}}
+	assert.Empty(t, f.r.secretToConnection(context.Background(), other), "not a kubeconfig Secret")
 }

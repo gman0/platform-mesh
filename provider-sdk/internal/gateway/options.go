@@ -38,8 +38,13 @@ const (
 
 // Options configure provider-gateway.
 type Options struct {
-	// Namespace holds the SDK's resources and the kubeconfig Secrets.
+	// Namespace holds the SDK's resources, the Server Keys' Secrets and the
+	// self-signed CA.
 	Namespace string
+	// KubeconfigNamespace holds the kubeconfig Secrets, apart from the keys,
+	// so the Provider's operator can be given read access to it alone.
+	// Default: Namespace.
+	KubeconfigNamespace string
 
 	// ConnectionAPIAddress serves the Connection API, plain HTTP: the
 	// Provider's Edge terminates the outer TLS, the Inner TLS protects the
@@ -80,6 +85,9 @@ type Options struct {
 
 // Complete fills in derived defaults and validates o.
 func (o *Options) Complete() error {
+	if o.KubeconfigNamespace == "" {
+		o.KubeconfigNamespace = o.Namespace
+	}
 	if o.ProxyHost == "" && len(o.Names) > 0 {
 		_, port, err := net.SplitHostPort(o.ProxyAddress)
 		if err != nil {
@@ -94,6 +102,9 @@ func (o *Options) validate() error {
 	var errs []error
 	if o.Namespace == "" {
 		errs = append(errs, errors.New("namespace is required"))
+	}
+	if msgs := validation.IsDNS1123Label(o.KubeconfigNamespace); o.KubeconfigNamespace != "" && len(msgs) > 0 {
+		errs = append(errs, fmt.Errorf("kubeconfig namespace %q: %s", o.KubeconfigNamespace, strings.Join(msgs, "; ")))
 	}
 	if _, _, err := net.SplitHostPort(o.ConnectionAPIAddress); err != nil {
 		errs = append(errs, fmt.Errorf("connection API address: %w", err))

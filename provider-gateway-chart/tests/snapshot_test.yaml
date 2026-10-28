@@ -1,0 +1,214 @@
+# Copyright The Platform Mesh Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+suite: provider-gateway
+chart:
+  version: 1.0.0
+  appVersion: 1.0.0
+release:
+  name: provider-gateway
+  namespace: provider-system
+tests:
+  - it: match snapshot
+    asserts:
+      - matchSnapshot: {}
+
+  - it: serves the operator proxy with cert-manager by default
+    templates:
+      - deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --serving-tls=cert-manager
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --serving-tls-dir=/etc/provider-gateway/serving
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --names=provider-gateway-operator-proxy.provider-system.svc,provider-gateway-operator-proxy.provider-system.svc.cluster.local,provider-gateway-operator-proxy.provider-system,provider-gateway-operator-proxy
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: serving
+            secret:
+              secretName: provider-gateway-serving
+
+  - it: creates its own CA and the serving certificate
+    templates:
+      - certificates.yaml
+    asserts:
+      - hasDocuments:
+          count: 4
+      - equal:
+          path: spec.dnsNames[0]
+          value: provider-gateway-operator-proxy.provider-system.svc
+        documentIndex: 3
+      - equal:
+          path: spec.issuerRef.name
+          value: provider-gateway-ca
+        documentIndex: 3
+
+  - it: issues the serving certificate from a given issuer
+    templates:
+      - certificates.yaml
+    set:
+      servingTLS.certManager.issuerRef:
+        kind: ClusterIssuer
+        name: company-ca
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: spec.issuerRef
+          value:
+            kind: ClusterIssuer
+            name: company-ca
+
+  - it: self-signed needs no cert-manager
+    set:
+      servingTLS.mode: self-signed
+    asserts:
+      - hasDocuments:
+          count: 0
+        template: certificates.yaml
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --ca-secret-name=provider-gateway-ca
+        template: deployment.yaml
+      - notExists:
+          path: spec.template.spec.volumes
+        template: deployment.yaml
+
+  - it: serves the Connection API over TLS for Edges that re-encrypt
+    templates:
+      - deployment.yaml
+    set:
+      connectionAPI.tlsSecretName: edge-backend-tls
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --connection-api-tls-dir=/etc/provider-gateway/connection-api
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: connection-api-tls
+            secret:
+              secretName: edge-backend-tls
+
+  - it: keeps standbys in the Connection API Service only
+    templates:
+      - service.yaml
+    asserts:
+      - equal:
+          path: spec.publishNotReadyAddresses
+          value: true
+        documentIndex: 0
+      - notExists:
+          path: spec.publishNotReadyAddresses
+        documentIndex: 1
+
+  - it: writes kubeconfig Secrets into their own namespace
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --kubeconfig-namespace=provider-system-kubeconfigs
+        template: deployment.yaml
+      - hasDocuments:
+          count: 3
+        template: kubeconfig-secrets.yaml
+      - isKind:
+          of: Namespace
+        documentIndex: 0
+        template: kubeconfig-secrets.yaml
+      - equal:
+          path: metadata.namespace
+          value: provider-system-kubeconfigs
+        documentIndex: 1
+        template: kubeconfig-secrets.yaml
+
+  - it: gives readers access to the kubeconfig Secrets only
+    templates:
+      - kubeconfig-secrets.yaml
+    set:
+      kubeconfigSecrets.namespace: wild-west-kubeconfigs
+      kubeconfigSecrets.createNamespace: false
+      kubeconfigSecrets.readers:
+        - kind: ServiceAccount
+          name: wild-west-operator
+          namespace: wild-west-operator-system
+    asserts:
+      - hasDocuments:
+          count: 4
+      - equal:
+          path: rules[0].verbs
+          value: [get, list, watch]
+        documentIndex: 2
+      - equal:
+          path: metadata.namespace
+          value: wild-west-kubeconfigs
+        documentIndex: 3
+      - equal:
+          path: subjects[0].name
+          value: wild-west-operator
+        documentIndex: 3
+
+  - it: refuses the release namespace for kubeconfig Secrets
+    templates:
+      - kubeconfig-secrets.yaml
+    set:
+      kubeconfigSecrets.namespace: provider-system
+    asserts:
+      - failedTemplate:
+          errorMessage: kubeconfigSecrets.namespace must differ from the release namespace, which holds the Server Keys' private keys
+
+  - it: refuses several replicas without leader election
+    templates:
+      - deployment.yaml
+    set:
+      leaderElection.enabled: false
+    asserts:
+      - failedTemplate:
+          errorMessage: "leaderElection.enabled is required with more than one replica: Sessions must all reach one replica"
+
+  - it: refuses an unknown serving TLS mode
+    templates:
+      - deployment.yaml
+    set:
+      servingTLS.mode: vault
+    asserts:
+      - failedTemplate:
+          errorMessage: servingTLS.mode must be cert-manager or self-signed
+
+  - it: has no monitoring resources by default
+    templates:
+      - monitoring.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: creates the ServiceMonitor and the rotation alert on request
+    templates:
+      - monitoring.yaml
+    set:
+      metrics.serviceMonitor.enabled: true
+      metrics.prometheusRule.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: ServiceMonitor
+        documentIndex: 0
+      - isKind:
+          of: PrometheusRule
+        documentIndex: 1

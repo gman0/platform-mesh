@@ -1,0 +1,124 @@
+# Copyright The Platform Mesh Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+crds:
+  # -- Install the CRDs (Connection, OnboardingToken, ServerKey)
+  enabled: true
+
+image:
+  # -- The image registry
+  registry: ghcr.io
+  # -- The image repository path (without registry)
+  repository: platform-mesh/platform-mesh/provider-gateway
+  # -- The image digest (when set, overrides tag: registry/repository@digest)
+  digest: ""
+  # -- Image tag; defaults to the chart appVersion when empty
+  tag: ""
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+
+# -- Replicas; one is active (elected), the others are standbys
+replicas: 2
+
+leaderElection:
+  # -- Elect the active replica; disable only with one replica
+  enabled: true
+  # -- The leader election Lease
+  id: provider-gateway
+
+connectionAPI:
+  # -- Port of the Connection API; the Provider's Edge routes the Base URL to this Service
+  port: 8080
+  # -- Secret with tls.crt and tls.key to serve the Connection API over TLS, for Edges that
+  # re-encrypt. Plain HTTP when empty: the Edge terminates the outer TLS, the Inner TLS
+  # protects the rest.
+  tlsSecretName: ""
+  # -- Keep standbys in the Service, so they answer upgrades with 503 and Retry-After during
+  # a failover instead of the Edge having no backend
+  publishNotReadyAddresses: true
+
+operatorProxy:
+  # -- Port of the operator proxy, reached by the Provider's operator through its kubeconfig
+  # Secrets; served by the active replica only
+  port: 3128
+
+kubeconfigSecrets:
+  # -- Namespace of the kubeconfig Secrets, one per Connection, which the Provider's operator
+  # reads. Kept apart from the release namespace, which holds the Server Keys' and CAs' private
+  # keys. Default: <release namespace>-kubeconfigs
+  namespace: ""
+  # -- Create the namespace
+  createNamespace: true
+  # -- Subjects given read access (get, list, watch) to the kubeconfig Secrets, e.g. the
+  # Provider's operator: [{kind: ServiceAccount, name: my-operator, namespace: my-operator-system}]
+  readers: []
+
+servingTLS:
+  # -- The operator proxy's TLS: cert-manager, or self-signed (a CA generated once into a
+  # Secret, serving certificates issued in memory)
+  mode: cert-manager
+  certManager:
+    # -- Issue the serving certificate from this Issuer or ClusterIssuer instead of the chart's
+    # own CA; it must put its CA into the Secret's ca.crt (e.g. a CA Issuer)
+    issuerRef: {}
+    # -- Lifetime of the chart's CA, which kubeconfigs trust
+    caDuration: 87600h
+    # -- Lifetime of the serving certificate
+    duration: 2160h
+    # -- Renew the serving certificate this long before it expires
+    renewBefore: 720h
+  selfSigned:
+    # -- The self-signed CA's Secret
+    caSecretName: provider-gateway-ca
+
+# -- How long after a token's expiry Registration retries are honoured
+retryWindow: 168h
+# -- How long a Connection's failure lasts before its Ready condition reports it
+readyDelay: 5m
+
+metrics:
+  # -- Port of the Prometheus metrics endpoint
+  port: 9090
+  serviceMonitor:
+    # -- Create a ServiceMonitor (Prometheus Operator)
+    enabled: false
+    # -- Extra labels for the ServiceMonitor, e.g. for the Prometheus selecting it
+    labels: {}
+    # -- Scrape interval; Prometheus' default when empty
+    interval: ""
+  prometheusRule:
+    # -- Create a PrometheusRule with the Server Key rotation alert
+    enabled: false
+    # -- Extra labels for the PrometheusRule
+    labels: {}
+
+# -- Port of the liveness and readiness endpoints
+healthPort: 8081
+
+# -- Extra arguments, e.g. --zap-log-level=debug
+extraArgs: []
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+# -- Pod affinity; by default replicas prefer different nodes
+affinity: {}
+# -- Node selector
+nodeSelector: {}
+# -- Tolerations
+tolerations: []

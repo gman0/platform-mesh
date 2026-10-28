@@ -1,0 +1,146 @@
+# Copyright The Platform Mesh Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{ $certManager := eq .Values.servingTLS.mode "cert-manager" -}}
+{{- if not (has .Values.servingTLS.mode (list "cert-manager" "self-signed")) -}}
+{{- fail "servingTLS.mode must be cert-manager or self-signed" -}}
+{{- end -}}
+{{- if and (gt (int .Values.replicas) 1) (not .Values.leaderElection.enabled) -}}
+{{- fail "leaderElection.enabled is required with more than one replica: Sessions must all reach one replica" -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "provider-gateway.name" . }}
+  labels:
+    {{- include "provider-gateway.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "provider-gateway.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "provider-gateway.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "provider-gateway.name" . }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      {{- if .Values.affinity }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}
+      {{- else }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "provider-gateway.selectorLabels" . | nindent 20 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: provider-gateway
+          image: {{ include "common.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --kubeconfig-namespace={{ include "provider-gateway.kubeconfigNamespace" . }}
+            - --connection-api-address=:{{ .Values.connectionAPI.port }}
+            {{- if .Values.connectionAPI.tlsSecretName }}
+            - --connection-api-tls-dir=/etc/provider-gateway/connection-api
+            {{- end }}
+            - --proxy-address=:{{ .Values.operatorProxy.port }}
+            - --metrics-address=:{{ .Values.metrics.port }}
+            - --health-address=:{{ .Values.healthPort }}
+            - --serving-tls={{ .Values.servingTLS.mode }}
+            {{- if $certManager }}
+            - --serving-tls-dir=/etc/provider-gateway/serving
+            {{- else }}
+            - --ca-secret-name={{ .Values.servingTLS.selfSigned.caSecretName }}
+            {{- end }}
+            - --names={{ include "provider-gateway.names" . | fromJsonArray | join "," }}
+            - --retry-window={{ .Values.retryWindow }}
+            - --ready-delay={{ .Values.readyDelay }}
+            - --leader-election={{ .Values.leaderElection.enabled }}
+            - --leader-election-id={{ .Values.leaderElection.id }}
+            {{- range .Values.extraArgs }}
+            - {{ . }}
+            {{- end }}
+          ports:
+            - name: connection-api
+              containerPort: {{ .Values.connectionAPI.port }}
+            - name: operator-proxy
+              containerPort: {{ .Values.operatorProxy.port }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+            - name: health
+              containerPort: {{ .Values.healthPort }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+          # Ready only when elected: the operator proxy's Service reaches the active
+          # replica only.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if or $certManager .Values.connectionAPI.tlsSecretName }}
+          volumeMounts:
+            {{- if $certManager }}
+            - name: serving
+              mountPath: /etc/provider-gateway/serving
+              readOnly: true
+            {{- end }}
+            {{- if .Values.connectionAPI.tlsSecretName }}
+            - name: connection-api-tls
+              mountPath: /etc/provider-gateway/connection-api
+              readOnly: true
+            {{- end }}
+          {{- end }}
+      {{- if or $certManager .Values.connectionAPI.tlsSecretName }}
+      volumes:
+        {{- if $certManager }}
+        - name: serving
+          secret:
+            secretName: {{ include "provider-gateway.servingSecretName" . }}
+        {{- end }}
+        {{- if .Values.connectionAPI.tlsSecretName }}
+        - name: connection-api-tls
+          secret:
+            secretName: {{ .Values.connectionAPI.tlsSecretName }}
+        {{- end }}
+      {{- end }}

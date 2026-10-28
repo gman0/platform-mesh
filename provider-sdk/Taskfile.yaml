@@ -23,6 +23,8 @@ includes:
 
 vars:
   CRD_DIRECTORY: config/crd/bases
+  # provider-gateway's CRD chart, kept in step with the generated CRDs.
+  CRD_CHART_DIRECTORY: ../provider-gateway-crds-chart/crds
 
 tasks:
   build:
@@ -39,13 +41,15 @@ tasks:
       - docker build -f provider-sdk/Dockerfile -t {{.IMAGE}} .
 
   manifests:
-    desc: Generate the CRDs of the SDK's kinds.
+    desc: Generate the CRDs of the SDK's kinds, and copy them into provider-gateway's CRD chart.
     cmds:
       - task: tools:generate-crds
         vars:
           BASEDIR: '{{.TASKFILE_DIR}}'
           PATH: /api/...
           OUTPUT: '{{.CRD_DIRECTORY}}'
+      - rm -f {{.CRD_CHART_DIRECTORY}}/*.yaml
+      - cp {{.CRD_DIRECTORY}}/*.yaml {{.CRD_CHART_DIRECTORY}}/
 
   generate:
     desc: Run code generation.

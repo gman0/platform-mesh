@@ -1,0 +1,72 @@
+# Copyright The Platform Mesh Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+{{- if .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "provider-gateway.name" . }}
+  labels:
+    {{- include "provider-gateway.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "provider-gateway.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: metrics
+  endpoints:
+    - port: metrics
+      path: /metrics
+      {{- with .Values.metrics.serviceMonitor.interval }}
+      interval: {{ . }}
+      {{- end }}
+{{- end }}
+{{- if .Values.metrics.prometheusRule.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "provider-gateway.name" . }}
+  labels:
+    {{- include "provider-gateway.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: provider-gateway
+      rules:
+        # A Server Key rotation is about to strand Connections: within a day of a key's
+        # retireAt (or past it), Connections seen in the last day still don't list a
+        # key that isn't retiring. List them with their lastSeen and follow the
+        # rotation runbook.
+        - alert: ProviderGatewayServerKeyRotationIncomplete
+          expr: |
+            (
+              sum by (namespace, key) (providersdk_server_key_connections{listed="false"}) > 0
+              unless on (namespace, key) providersdk_server_key_retire_at_seconds
+            )
+            and on (namespace)
+            (
+              count by (namespace) (providersdk_server_key_retire_at_seconds - time() < 86400) > 0
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Connections don't list the new Server Key yet
+            description: '{{ "{{ $value }}" }} Connection(s) seen in the last day don''t list ServerKey {{ "{{ $labels.key }}" }}, and another key is retired within a day.'
+{{- end }}

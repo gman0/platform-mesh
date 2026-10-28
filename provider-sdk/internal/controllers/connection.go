@@ -26,10 +26,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"go.platform-mesh.io/provider-protocol/bundle"
@@ -50,6 +52,9 @@ const (
 // reports on it.
 type ConnectionReconciler struct {
 	Client client.Client
+	// Namespace holds the Connections; kubeconfig Secrets, wherever they
+	// are, map back to it by their Connection label.
+	Namespace string
 	// APIReader reads uncached, before an orphan is expired.
 	APIReader client.Reader
 	Sessions  *session.Registry
@@ -323,10 +328,20 @@ func equalConditions(a, b []metav1.Condition) bool {
 }
 
 // SetupWithManager watches Connections and their kubeconfig Secrets, so a
-// deleted Secret is recreated.
+// deleted Secret is recreated. The Secrets are found by their Connection
+// label: in a namespace of their own, they have no owner reference.
 func (r *ConnectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&sdkv1alpha1.Connection{}).
-		Owns(&corev1.Secret{}).
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.secretToConnection)).
 		Complete(r)
+}
+
+// secretToConnection maps a kubeconfig Secret to its Connection.
+func (r *ConnectionReconciler) secretToConnection(_ context.Context, obj client.Object) []reconcile.Request {
+	id := obj.GetLabels()[sdkv1alpha1.ConnectionLabel]
+	if id == "" {
+		return nil
+	}
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: r.Namespace, Name: id}}}
 }

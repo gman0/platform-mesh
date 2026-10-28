@@ -189,6 +189,23 @@ func TestEnsureRecreatesALostSecret(t *testing.T) {
 	assert.False(t, CheckCredential(f.conn(), old))
 }
 
+func TestEnsureInItsOwnNamespace(t *testing.T) {
+	f := newWriterFixture(t)
+	f.w.Namespace = "wild-west-kubeconfigs"
+	f.ensure()
+
+	var s corev1.Secret
+	require.NoError(t, f.client.Get(context.Background(), types.NamespacedName{Namespace: f.w.Namespace, Name: SecretName(connID)}, &s))
+	assert.Equal(t, connID, s.Labels[sdkv1alpha1.ConnectionLabel])
+	assert.Empty(t, s.OwnerReferences, "owner references can't cross namespaces")
+	_, err := f.secret()
+	assert.Error(t, err, "nothing in the Connection's namespace")
+
+	require.NoError(t, f.w.Delete(context.Background(), connID))
+	err = f.client.Get(context.Background(), types.NamespacedName{Namespace: f.w.Namespace, Name: SecretName(connID)}, &s)
+	assert.Error(t, err)
+}
+
 func TestDelete(t *testing.T) {
 	f := newWriterFixture(t)
 	f.ensure()

@@ -41,7 +41,8 @@ const (
 func main() {
 	o := gateway.Options{}
 	fs := flag.CommandLine
-	fs.StringVar(&o.Namespace, "namespace", "", "namespace of the SDK's resources (default: the pod's)")
+	fs.StringVar(&o.Namespace, "namespace", "", "namespace of the SDK's resources and keys (default: the pod's)")
+	fs.StringVar(&o.KubeconfigNamespace, "kubeconfig-namespace", "", "namespace of the kubeconfig Secrets, apart from the keys so the Provider's operator can read it alone (default: --namespace)")
 	fs.StringVar(&o.ConnectionAPIAddress, "connection-api-address", ":8080", "address of the Connection API, plain HTTP unless --connection-api-tls-dir is set")
 	fs.StringVar(&o.ConnectionAPITLSDir, "connection-api-tls-dir", "", "directory with tls.crt and tls.key to serve the Connection API over TLS, for Edges that re-encrypt")
 	fs.StringVar(&o.ProxyAddress, "proxy-address", ":3128", "address of the operator proxy")
