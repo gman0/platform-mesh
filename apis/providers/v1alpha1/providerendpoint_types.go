@@ -26,12 +26,9 @@ const (
 	ProviderEndpointName = "default"
 
 	// ConnectionExportName is the APIExport serving providerendpoints, in
-	// :root:providers:system.
-	ConnectionExportName = "connections.providers.platform-mesh.io"
-
-	// ConnectionExportBindingName is the fixed name of its APIBinding in
-	// every Provider Workspace.
-	ConnectionExportBindingName = ConnectionExportName
+	// :root:platform-mesh-system. The Provider Workspaces' WorkspaceType
+	// binds it by default; kcp names that binding.
+	ConnectionExportName = "providerendpoints.platform-mesh.io"
 )
 
 // ProviderEndpointSpec is a Connection as Connectors and the Provider-side

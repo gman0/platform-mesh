@@ -41,12 +41,11 @@ const (
 	ProviderConditionKubeconfig = "Kubeconfig"
 
 	// Remote Providers, besides Workspace.
-	ProviderConditionConnectionBinding = "ConnectionBinding"
-	ProviderConditionConnectorAccess   = "ConnectorAccess"
-	ProviderConditionRegistered        = "Registered"
-	ProviderConditionConnected         = "Connected"
-	ProviderConditionProtocolOutdated  = "ProtocolOutdated"
-	ProviderConditionTrustOutdated     = "TrustOutdated"
+	ProviderConditionConnectorAccess  = "ConnectorAccess"
+	ProviderConditionRegistered       = "Registered"
+	ProviderConditionConnected        = "Connected"
+	ProviderConditionProtocolOutdated = "ProtocolOutdated"
+	ProviderConditionTrustOutdated    = "TrustOutdated"
 )
 
 // Stable labels of Remote Provider conditions: the condition's reason, and
