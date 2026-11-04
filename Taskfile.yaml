@@ -57,11 +57,14 @@ vars:
 
     # shared
     - apis
+    - protocol
+    - sdk
     - subroutines
     - golang-commons
     - virtual-workspaces
 
     # operators
+    - access-operator
     - account-operator
     - extension-manager-operator
     - extension-manager-virtual-workspace
@@ -82,6 +85,8 @@ vars:
 
   LIBRARIES:
     - apis
+    - protocol
+    - sdk
     - subroutines
     - golang-commons
     - virtual-workspaces
