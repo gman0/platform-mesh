@@ -29,11 +29,14 @@ kcp:
 
   # -- Secret mounted into the Pod carrying the kcp CA bundle PEM
   # (propagated into the /access handshake body). Must exist in the
-  # Release namespace. The key inside the Secret is configured via
-  # kcp.caBundleSecretKey.
-  caBundleSecret: kcp-ca-bundle
+  # Release namespace. Default matches what kcp-operator's RootShard
+  # controller produces for a RootShard named "root"; override if your
+  # kcp install uses a different RootShard name or provides the bundle
+  # some other way.
+  caBundleSecret: root-merged-ca-bundle
   # -- Key inside kcp.caBundleSecret whose value is the PEM CA bundle.
-  caBundleSecretKey: ca.crt
+  # kcp-operator's merged-ca-bundle Secret stores it under tls.crt.
+  caBundleSecretKey: tls.crt
 
 access:
   endpointSliceName: access.platform-mesh.io
