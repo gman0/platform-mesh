@@ -184,6 +184,19 @@ func (r *ScopedKubeconfigSubroutine) Process(ctx context.Context, obj ctrlruntim
 		return subroutines.StopWithRequeue(waitProviderRequeueDuration, "waiting for SA token to be populated"), nil
 	}
 
+	// In remote mode the Provider does not get a locally-delivered
+	// kubeconfig Secret; access-operator will deliver one to the
+	// user-side cluster via /access. SA, CRB and token Secret above
+	// are still required and get bootstrapped unconditionally.
+	// TODO(stage-5): split this subroutine into provider_identity.go +
+	// provider_kubeconfig.go so the kubeconfig half can be gated at
+	// the lifecycle level rather than with an early return here.
+	if inst.Spec.Remote != nil {
+		inst.Status.Phase = pmprovidersv1alpha1.ProviderPhaseReady
+		log.Info().Str("provider", inst.Name).Msg("Provider in remote mode; skipping local kubeconfig Secret")
+		return subroutines.OK(), nil
+	}
+
 	token := string(tokenSecret.Data["token"])
 	caData := tokenSecret.Data["ca.crt"]
 

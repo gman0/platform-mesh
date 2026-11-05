@@ -36,6 +36,7 @@ import (
 	fluxcdv1 "github.com/fluxcd/source-controller/api/v1beta2"
 	"github.com/rs/zerolog/log"
 
+	pmaccessv1alpha1 "go.platform-mesh.io/apis/access/v1alpha1"
 	pmcorev1alpha1 "go.platform-mesh.io/apis/core/v1alpha1"
 	pmprovidersv1alpha1 "go.platform-mesh.io/apis/providers/v1alpha1"
 	pmconfig "go.platform-mesh.io/golang-commons/config"
@@ -95,6 +96,7 @@ func (h *Helper) NewKcpClient(config *rest.Config, workspacePath string) (ctrlru
 	utilruntime.Must(rbacv1.AddToScheme(scheme))
 	utilruntime.Must(admissionregistrationv1.AddToScheme(scheme))
 	utilruntime.Must(pmprovidersv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(pmaccessv1alpha1.AddToScheme(scheme))
 
 	cl, err := ctrlruntimeclient.New(config, ctrlruntimeclient.Options{
 		Scheme: scheme,
