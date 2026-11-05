@@ -24,11 +24,28 @@ FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c03
 COPY . /app/
 RUN chown -R 65532:65532 /app
 
-# Fixed path + fixed entrypoint. The production charts set container `args` only
-# and rely on the image's entrypoint being the operator, so a per-component path
-# would never be invoked. live_update syncs the rebuilt binary to this same
-# path. The ENTRYPOINT here is a fallback for a plain `docker run` — under Tilt
-# the restart_process extension replaces it with its wrapper around this path
-# (see component_binary in helpers.py), preserving args-append semantics.
+# Restart wrapper, baked into the image so we don't depend on the
+# restart_process Tilt extension (which requires a local docker/podman API
+# the user may not have). The wrapper execs /app/entrypoint, waits on a
+# trigger file, and re-execs on change. live_update in helpers.py syncs
+# the binary and `touch`es /tmp/.tilt_restart to trigger the re-exec.
+RUN apk add --no-cache inotify-tools \
+ && printf '%s\n' \
+    '#!/bin/sh' \
+    'set -e' \
+    'trigger=/tmp/.tilt_restart' \
+    'mkdir -p "$(dirname "$trigger")"' \
+    ': > "$trigger"' \
+    'while true; do' \
+    '    /app/entrypoint "$@" &' \
+    '    pid=$!' \
+    '    inotifywait -qq -e close_write,delete_self "$trigger" || true' \
+    '    kill "$pid" 2>/dev/null || true' \
+    '    wait "$pid" 2>/dev/null || true' \
+    'done' \
+    > /app/.restart-wrapper \
+ && chmod +x /app/.restart-wrapper \
+ && chown 65532:65532 /app/.restart-wrapper /tmp
+
 USER 65532:65532
-ENTRYPOINT ["/app/entrypoint"]
+ENTRYPOINT ["/app/.restart-wrapper"]

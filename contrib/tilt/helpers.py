@@ -21,7 +21,11 @@
 # works on the docker runtime; kind runs containerd. This extension wraps the
 # entrypoint in `entr` and rewrites a trigger file as the last live_update step,
 # so the operator actually re-execs on every sync.
-load('ext://restart_process', 'docker_build_with_restart')
+# Restart on live-update is implemented by the wrapper baked into
+# runtime.Dockerfile (see /app/.restart-wrapper); no external extension
+# needed. The run() step at the tail of live_update touches the trigger
+# file inside the container, which causes the wrapper to kill the old
+# process and re-exec the new binary.
 
 # `go env` honours a GOARCH override from the environment.
 BUILD_GOARCH = str(local('go env GOARCH', quiet=True, echo_off=True)).strip()
@@ -324,13 +328,25 @@ def component_binary(name, path, deps, image, extra_dirs={}, labels=['platform-m
         labels=labels,
         allow_parallel=True,
     )
-    # entrypoint as a LIST, not a string: the extension runs a string entrypoint
-    # under `sh -c`, which swallows the container `args` the charts set (they pass
-    # args only and inherit the image entrypoint). A list is appended to verbatim.
-    docker_build_with_restart(
+    # custom_build is used instead of docker_build so we can route through either
+    # docker or podman (contrib/tilt/hack/build-and-load.sh). build-and-load.sh
+    # builds the image with whichever runtime is usable and loads it into kind.
+    # skips_local_docker=True tells Tilt not to pull the image back through a
+    # local docker API — the image is already in kind.
+    dockerfile = os.path.join(TILT_DIR, 'runtime.Dockerfile')
+    build_cmd = '{script} ${{EXPECTED_REF}} {ctx} {df}'.format(
+        script=os.path.join(TILT_DIR, 'hack', 'build-and-load.sh'),
+        ctx=bin_dir,
+        df=dockerfile,
+    )
+    custom_build(
         ref=image,
-        context=bin_dir,
-        dockerfile=os.path.join(TILT_DIR, 'runtime.Dockerfile'),
-        entrypoint=['/app/entrypoint'],
-        live_update=[sync(bin_dir, '/app')],
+        command=build_cmd,
+        deps=[bin_dir],
+        skips_local_docker=True,
+        live_update=[
+            sync(bin_dir, '/app'),
+            # Touch the file the restart wrapper in runtime.Dockerfile watches.
+            run('touch /tmp/.tilt_restart', trigger=[os.path.join(bin_dir, 'entrypoint')]),
+        ],
     )
