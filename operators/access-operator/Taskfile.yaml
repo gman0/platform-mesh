@@ -79,6 +79,17 @@ tasks:
                 mv "{{.CRD_DIRECTORY}}/apigen/out/${manifest}" "${dest}"
             done
         ignore_error: false
+      - task: sync-manifests-to-pm-operator
+
+  sync-manifests-to-pm-operator:
+    desc: Copy the AccessGrant APIExport + APIResourceSchema into platform-mesh-operator's manifests dir so its KcpsetupSubroutine applies them. Called by apigen; also runnable standalone.
+    vars:
+      SRC: ./manifests/kcp/01-platform-mesh-system
+      DEST: ../platform-mesh-operator/manifests/kcp/01-platform-mesh-system
+    cmds:
+      - mkdir -p "{{.DEST}}"
+      - cp "{{.SRC}}/apiexport-access.platform-mesh.io.yaml" "{{.DEST}}/"
+      - cp "{{.SRC}}/apiresourceschema-accessgrants.access.platform-mesh.io.yaml" "{{.DEST}}/"
 
   generate:
     desc: Generate code (deepcopy, manifests, apigen).
