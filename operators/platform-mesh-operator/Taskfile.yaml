@@ -107,12 +107,14 @@ tasks:
                 # Add your apigen input CRDs below.
                 {{.CRD_DIRECTORY}}/providers.platform-mesh.io_providers.yaml
                 {{.CRD_DIRECTORY}}/providers.platform-mesh.io_providerpermissions.yaml
+                {{.CRD_DIRECTORY}}/providers.platform-mesh.io_provideraccessrequests.yaml
             )
             apigen_dest=(
                 # Add your apigen output paths below.
                 {{.TOPLEVEL}}/apis/static-assets/kcp/01-platform-mesh-system/apiexport-providers.platform-mesh.io.yaml
                 {{.TOPLEVEL}}/apis/static-assets/kcp/01-platform-mesh-system/apiresourceschema-providers.providers.platform-mesh.io.yaml
                 {{.TOPLEVEL}}/apis/static-assets/kcp/01-platform-mesh-system/apiresourceschema-providerpermissions.providers.platform-mesh.io.yaml
+                {{.TOPLEVEL}}/apis/static-assets/kcp/01-platform-mesh-system/apiresourceschema-provideraccessrequests.providers.platform-mesh.io.yaml
             )
 
             # NOTE: this script also applies yaml-patch files from {{.CRD_DIRECTORY}}/apigen/patches onto {{.CRD_DIRECTORY}}/apigen/out.

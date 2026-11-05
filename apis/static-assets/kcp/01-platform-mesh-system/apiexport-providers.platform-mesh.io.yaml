@@ -70,6 +70,11 @@ spec:
     - delete
   resources:
   - group: providers.platform-mesh.io
+    name: provideraccessrequests
+    schema: v261105-60b7f2ed.provideraccessrequests.providers.platform-mesh.io
+    storage:
+      crd: {}
+  - group: providers.platform-mesh.io
     name: providerpermissions
     schema: v261106-a01ebf3e.providerpermissions.providers.platform-mesh.io
     storage:
