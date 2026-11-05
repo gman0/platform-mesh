@@ -1,0 +1,52 @@
+image:
+  # -- Image registry.
+  registry: ghcr.io
+  # -- Image repository (without registry).
+  repository: platform-mesh/platform-mesh/access-operator
+  # -- Image digest (when set, overrides tag: registry/repository@digest).
+  digest: ""
+
+kcp:
+  # -- Publicly-reachable kcp URL propagated into the /access handshake
+  # body for user-side clusters to use. Required; operator refuses to
+  # perform handshakes if unset.
+  externalUrl: ""
+
+  # -- Internal (in-cluster) kcp URL the operator uses to engage the
+  # apiexport-provider on access.platform-mesh.io. Leave empty to derive
+  # from kcp.frontProxyName / frontProxyPort.
+  url: ""
+
+  namespace: platform-mesh-system
+  frontProxyName: frontproxy
+  frontProxyPort: "8443"
+
+  # -- Secret holding the kcp cluster-admin credentials used to build
+  # the kcp admin REST config at startup. Mirrors pm-operator's
+  # convention. TODO(stage-5): replace with a dedicated access-operator
+  # SA + narrow RBAC.
+  clusterAdminSecretName: kcp-cluster-admin-client-cert
+
+  # -- Secret mounted into the Pod carrying the kcp CA bundle PEM
+  # (propagated into the /access handshake body). Must exist in the
+  # Release namespace. The key inside the Secret is configured via
+  # kcp.caBundleSecretKey.
+  caBundleSecret: kcp-ca-bundle
+  # -- Key inside kcp.caBundleSecret whose value is the PEM CA bundle.
+  caBundleSecretKey: ca.crt
+
+access:
+  endpointSliceName: access.platform-mesh.io
+  endpointSliceWorkspace: "root:platform-mesh-system"
+
+security:
+  mountServiceAccountToken: true
+
+deployment:
+  specTemplate:
+    annotations: {}
+    labels: {}
+  replicas: 1
+
+operator:
+  leaderElect: true
