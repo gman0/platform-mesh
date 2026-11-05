@@ -749,7 +749,6 @@ github.com/kataras/tunnel v0.0.4/go.mod h1:9FkU4LaeifdMWqZu7o20ojmW4B7hdhv2CMLwf
 github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 h1:Z9n2FFNUXsshfwJMBgNA0RU6/i7WVaAegv3PtuIHPMs=
 github.com/kcp-dev/apimachinery/v2 v2.31.2-0.20260505083940-abda469632ba/go.mod h1:1Rkhiwoq345wlUYtq1/P+3chL2eE1rdoIgBPwb6Y9x8=
 github.com/kcp-dev/apimachinery/v2 v2.32.0/go.mod h1:1Rkhiwoq345wlUYtq1/P+3chL2eE1rdoIgBPwb6Y9x8=
-github.com/kcp-dev/apimachinery/v2 v2.33.6/go.mod h1:1Rkhiwoq345wlUYtq1/P+3chL2eE1rdoIgBPwb6Y9x8=
 github.com/kcp-dev/client-go v0.28.1-0.20260511140521-487de9552c40/go.mod h1:SVLehuEWP57f8F4rKUn8hJXCFXJFtER4va77pY+x2m8=
 github.com/kcp-dev/client-go v0.33.0 h1:BZA2xbSi76idNoe4I4fmNNoGV9q2UIeB82kS7QeYeHo=
 github.com/kcp-dev/client-go v0.33.0/go.mod h1:CXPF+AHW5FPdOcxdiZ88Q7+6AwA/YVlBlmqxMN1NN6U=
