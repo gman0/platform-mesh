@@ -1,4 +1,6 @@
-go 1.26.5
+go 1.26.10
+
+toolchain go1.26.10
 
 use (
 	./apis
@@ -15,6 +17,7 @@ use (
 	./operators/resource-broker
 	./operators/security-operator
 	./operators/terminal-controller-manager
+	./protocol
 	./sdk
 	./services/iam-service
 	./services/kubernetes-graphql-gateway

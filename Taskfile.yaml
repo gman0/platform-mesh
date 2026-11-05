@@ -51,6 +51,7 @@ vars:
   COMPONENTS:
     # shared
     - apis
+    - protocol
     - sdk
     - subroutines
     - golang-commons
@@ -75,6 +76,7 @@ vars:
 
   LIBRARIES:
     - apis
+    - protocol
     - sdk
     - subroutines
     - golang-commons
