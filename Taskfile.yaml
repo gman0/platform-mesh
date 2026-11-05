@@ -56,6 +56,7 @@ vars:
 
     # shared
     - apis
+    - sdk
     - subroutines
     - golang-commons
 
@@ -78,6 +79,7 @@ vars:
 
   LIBRARIES:
     - apis
+    - sdk
     - subroutines
     - golang-commons
 

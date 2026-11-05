@@ -1,6 +1,4 @@
-go 1.27.3
-
-toolchain go1.27.3
+go 1.26.5
 
 use (
 	.
@@ -16,6 +14,7 @@ use (
 	./operators/resource-broker
 	./operators/security-operator
 	./operators/terminal-controller-manager
+	./sdk
 	./services/iam-service
 	./services/kubernetes-graphql-gateway
 	./services/rebac-authz-webhook
