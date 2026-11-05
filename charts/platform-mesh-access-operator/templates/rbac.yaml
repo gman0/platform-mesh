@@ -1,0 +1,38 @@
+---
+# TODO(stage-5): narrow this RBAC. Currently access-operator reads the
+# shared kcp cluster-admin Secret and uses it to build the kcp admin
+# REST config, which gives it full kcp admin. A dedicated SA with
+# just enough RBAC to engage the access.platform-mesh.io APIExport +
+# mint SA tokens in Provider Workspaces should replace this.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "common.entity.name" . }}
+rules:
+  # Read the kcp cluster-admin Secret. Scoped to the Release namespace
+  # and the configured Secret name in the chart's current form; still
+  # over-broad relative to the Stage-5 target.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  # Leader election.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Events for operator telemetry.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "common.entity.name" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "common.entity.name" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "common.entity.name" . }}
+    namespace: {{ .Release.Namespace }}
