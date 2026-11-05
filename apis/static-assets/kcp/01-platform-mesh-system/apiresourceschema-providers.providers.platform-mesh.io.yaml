@@ -30,9 +30,14 @@ spec:
       jsonPath: .status.phase
       name: Phase
       type: string
-    - description: Name of the generated kubeconfig Secret
+    - description: Name of the generated kubeconfig Secret (local mode)
       jsonPath: .status.kubeconfigSecretRef.name
       name: KubeconfigSecret
+      type: string
+    - description: Where PM dials to deliver credentials (remote mode)
+      jsonPath: .status.remote.accessURL
+      name: AccessURL
+      priority: 1
       type: string
     - description: Shows if resource is ready
       jsonPath: .status.conditions[?(@.type=='Ready')].status
@@ -73,10 +78,11 @@ spec:
             providerKubeconfigSecret:
               description: |-
                 providerKubeconfigSecret is a Secret specification used to store
-                the provider's kubeconfig. This is the admin kubeconfig that provider controllers
-                can use to access the workspace in :root:providers:<WS name>.
+                the provider's kubeconfig in local mode. This is the admin kubeconfig that
+                provider controllers can use to access the workspace in :root:providers:<WS name>.
                 If not provided, a default of Namespace:default, Name:<Provider.Name>-provider-kubeconfig,
                 Key:kubeconfig is used.
+                Ignored (and not populated) in remote mode.
               properties:
                 key:
                   description: key is the key in data map where the kubeconfig YAML
@@ -93,7 +99,26 @@ spec:
               - name
               - namespace
               type: object
+            remote:
+              description: |-
+                remote opts the Provider into remote-delivery mode. When set, the
+                kubeconfig is delivered to a user-side cluster via an AccessGrant
+                owned by this Provider rather than being materialised locally as a
+                Secret. Mode is immutable after creation.
+              properties:
+                caBundle:
+                  description: |-
+                    caBundle is the PEM-encoded CA material access-operator uses to
+                    verify the TLS server cert on the user-side /access endpoint.
+                    Omitted means access-operator uses system CAs (public web PKI).
+                    When set, system CAs are not consulted for this endpoint.
+                  type: string
+              type: object
           type: object
+          x-kubernetes-validations:
+          - message: spec.remote presence is immutable; mode switch requires delete
+              + recreate
+            rule: has(self.remote) == has(oldSelf.remote)
         status:
           description: status defines the observed state of Provider
           properties:
@@ -171,6 +196,7 @@ spec:
               description: |-
                 providerKubeconfigSecretRef points to the Secret that contains
                 the scoped kubeconfig for the provider workspace.
+                Populated in local mode only.
               properties:
                 name:
                   description: name is unique within a namespace to reference a secret
@@ -182,6 +208,28 @@ spec:
                   type: string
               type: object
               x-kubernetes-map-type: atomic
+            remote:
+              description: |-
+                remote carries informational fields populated when the Provider is
+                in remote-delivery mode (spec.remote set). Live connection state
+                lives in status.conditions (Connected, Ready, etc.); this
+                sub-struct carries informational fields for debugging and
+                out-of-band verification.
+              properties:
+                accessURL:
+                  description: |-
+                    accessURL is where PM dials to deliver credentials; extracted from
+                    the access token. Informational - lets the Owner confirm which
+                    user-side endpoint PM is reaching out to.
+                  type: string
+                tokenID:
+                  description: |-
+                    tokenID is the identifier derived from the access token. Safe to
+                    log; surfaced for out-of-band verification (an Owner can cross-check
+                    this against the token ID shown in the user-side AccessIdentity's
+                    pendingConnections queue when accept mode is Manual).
+                  type: string
+              type: object
           type: object
       required:
       - spec
