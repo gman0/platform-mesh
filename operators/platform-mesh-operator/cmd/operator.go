@@ -274,6 +274,16 @@ func startProvidersOperator(ctx context.Context, runtimeCl ctrlruntimeclient.Cli
 		os.Exit(1)
 	}
 
+	parReconciler, err := providers.NewPARReconciler(mgr, &operatorCfg, defaultCfg, runtimeCl)
+	if err != nil {
+		setupLog.Error(err, "failed to create PAR reconciler")
+		os.Exit(1)
+	}
+	if err := parReconciler.SetupWithManager(mgr, defaultCfg); err != nil {
+		setupLog.Error(err, "unable to setup PARReconciler with manager")
+		os.Exit(1)
+	}
+
 	if err := multiProvider.AddProvider("apiexport-providers-platform-mesh", apiexportProvider); err != nil {
 		setupLog.Error(err, "failed to add apiexport-providers-platform-mesh provider")
 		os.Exit(1)
