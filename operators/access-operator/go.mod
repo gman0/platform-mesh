@@ -2,7 +2,6 @@ module go.platform-mesh.io/access-operator
 
 go 1.26.10
 
-// TODO: Access APIs nor the protocol mod haven't been published yet. Remove this then.
 replace go.platform-mesh.io/apis => ../../apis
 
 replace go.platform-mesh.io/protocol => ../../protocol
