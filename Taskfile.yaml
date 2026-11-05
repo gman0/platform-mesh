@@ -62,6 +62,7 @@ vars:
     - golang-commons
 
     # operators
+    - access-operator
     - account-operator
     - extension-manager-operator
     - kro-composition-operator
