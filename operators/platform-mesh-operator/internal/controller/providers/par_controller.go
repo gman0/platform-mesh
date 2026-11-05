@@ -25,6 +25,7 @@ import (
 	"go.platform-mesh.io/golang-commons/controller/filter"
 	"go.platform-mesh.io/golang-commons/controller/lifecycle/ratelimiter"
 	"go.platform-mesh.io/platform-mesh-operator/internal/config"
+	pmsubroutines "go.platform-mesh.io/platform-mesh-operator/pkg/subroutines"
 	pmsubs "go.platform-mesh.io/platform-mesh-operator/pkg/subroutines/providers"
 	"go.platform-mesh.io/subroutines"
 	"go.platform-mesh.io/subroutines/conditions"
@@ -73,17 +74,38 @@ func (r *PARReconciler) SetupWithManager(mgr mcmanager.Manager, cfg *pmconfig.Co
 }
 
 func NewPARReconciler(mgr mcmanager.Manager, operatorCfg *config.OperatorConfig, commonCfg *pmconfig.CommonServiceConfig, localClient ctrlruntimeclient.Client) (*PARReconciler, error) {
+	kcpUrl := operatorCfg.KCP.Url
+	if kcpUrl == "" {
+		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s", operatorCfg.KCP.FrontProxyName, operatorCfg.KCP.Namespace, operatorCfg.KCP.FrontProxyPort)
+	}
+
 	rl, err := ratelimiter.NewStaticThenExponentialRateLimiter[mcreconcile.Request](ratelimiter.NewConfig())
 	if err != nil {
 		return nil, fmt.Errorf("creating rate limiter: %w", err)
 	}
+
+	kcpHelper := &pmsubroutines.Helper{}
 
 	var subs []subroutines.Subroutine
 
 	if operatorCfg.Subroutines.PAR.Resolve.Enabled {
 		subs = append(subs, pmsubs.NewPARResolveSubroutine(localClient))
 	}
-	// par_grant subroutine will append here when it lands.
+	if operatorCfg.Subroutines.PAR.Grant.Enabled {
+		subs = append(subs, pmsubs.NewPARGrantSubroutine(
+			localClient,
+			kcpHelper,
+			operatorCfg.KCP,
+			kcpUrl,
+			func(ctx context.Context) (ctrlruntimeclient.Client, error) {
+				cluster, err := mgr.ClusterFromContext(ctx)
+				if err != nil {
+					return nil, err
+				}
+				return cluster.GetClient(), nil
+			},
+		))
+	}
 
 	lc := lifecycle.New(mgr, PARControllerName, func() ctrlruntimeclient.Object {
 		return &pmprovidersv1alpha1.ProviderAccessRequest{}
