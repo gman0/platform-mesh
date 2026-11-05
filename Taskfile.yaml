@@ -57,6 +57,7 @@ vars:
     - golang-commons
 
     # operators
+    - access-operator
     - account-operator
     - backup-operator
     - extension-manager-operator

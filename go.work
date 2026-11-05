@@ -7,6 +7,7 @@ use (
 	./cmd/jl
 	./cmd/qbrtool
 	./golang-commons
+	./operators/access-operator
 	./operators/account-operator
 	./operators/backup-operator
 	./operators/extension-manager-operator
