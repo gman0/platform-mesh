@@ -31,7 +31,7 @@ vars:
   # User-side (access SDK) CRDs land in a sibling Helm chart alongside
   # the PM-side chart under charts/. The chart ships to user-side
   # clusters where the access SDK runs.
-  ACCESS_SDK_CRDS: '{{.TOPLEVEL}}/charts/platform-mesh-access-sdk-crds/crds'
+  ACCESS_SDK_CRDS: /charts/platform-mesh-access-sdk-crds/templates
 
 tasks:
   build:
@@ -57,7 +57,7 @@ tasks:
         vars:
           BASEDIR: '{{.TOPLEVEL}}/sdk'
           PATH: /access/...
-          OUTPUT: '{{.ACCESS_SDK_CRDS}}'
+          OUTPUT: '{{.TOPLEVEL}}{{.ACCESS_SDK_CRDS}}'
   test:
     desc: Run sdk unit tests.
     cmds:

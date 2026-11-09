@@ -119,6 +119,14 @@ local_resource(
 )
 
 # --- services
+service(
+    "access-operator",
+    NAMESPACE,
+    TEMPLATE_VARS,
+    path="operators/access-operator",
+    deps=GO_DEPS,
+    resource_deps=["platformmesh-ready"],
+)
 service("account-operator", NAMESPACE, TEMPLATE_VARS, path="operators/account-operator", deps=GO_DEPS)
 service(
     "extension-manager-operator",

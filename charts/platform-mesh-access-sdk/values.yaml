@@ -1,3 +1,6 @@
+crds:
+  enabled: true
+
 image:
   # -- Image registry.
   registry: ghcr.io
@@ -33,6 +36,9 @@ service:
   # for in-cluster deployments; LoadBalancer / NodePort for cross-cluster
   # reachability.
   type: ClusterIP
+  # -- Static NodePort to pin when service.type is NodePort. Leave unset
+  # to let Kubernetes assign one from the service-node-port-range.
+  nodePort: ""
 
 security:
   mountServiceAccountToken: true

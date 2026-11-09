@@ -1,4 +1,4 @@
-# platform-mesh-access-operator
+# access-operator
 
 A Helm chart to deploy the Platform Mesh access-operator on the PM runtime cluster.
 

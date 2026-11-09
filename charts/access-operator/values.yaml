@@ -29,13 +29,15 @@ kcp:
 
   # -- Secret mounted into the Pod carrying the kcp CA bundle PEM
   # (propagated into the /access handshake body). Must exist in the
-  # Release namespace. Default matches what kcp-operator's RootShard
-  # controller produces for a RootShard named "root"; override if your
-  # kcp install uses a different RootShard name or provides the bundle
-  # some other way.
-  caBundleSecret: root-merged-ca-bundle
+  # Release namespace. Default matches the ServerCA Issuer Secret
+  # cert-manager writes for a RootShard named "root" — the same Secret
+  # kcp-operator reads when it builds Kubeconfig CR outputs (see
+  # kcp-operator's internal/resources/kubeconfig/secret.go). Override
+  # if your kcp install uses a different RootShard name or provides
+  # the bundle some other way.
+  caBundleSecret: root-server-ca
   # -- Key inside kcp.caBundleSecret whose value is the PEM CA bundle.
-  # kcp-operator's merged-ca-bundle Secret stores it under tls.crt.
+  # cert-manager stores the Issuer's CA under tls.crt.
   caBundleSecretKey: tls.crt
 
 access:

@@ -12,3 +12,6 @@ spec:
       port: 443
       targetPort: access
       protocol: TCP
+      {{- with .Values.service.nodePort }}
+      nodePort: {{ . }}
+      {{- end }}

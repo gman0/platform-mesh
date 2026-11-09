@@ -38,7 +38,7 @@ spec:
               containerPort: 8080
               protocol: TCP
             - name: health
-              containerPort: 8081
+              containerPort: 8090
               protocol: TCP
           livenessProbe:
             httpGet:
