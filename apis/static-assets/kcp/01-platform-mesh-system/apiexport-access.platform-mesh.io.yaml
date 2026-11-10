@@ -20,7 +20,7 @@ spec:
   resources:
   - group: access.platform-mesh.io
     name: accessgrants
-    schema: v261105-72b4f057.accessgrants.access.platform-mesh.io
+    schema: v261110-eb4f544e.accessgrants.access.platform-mesh.io
     storage:
       crd: {}
 status: {}

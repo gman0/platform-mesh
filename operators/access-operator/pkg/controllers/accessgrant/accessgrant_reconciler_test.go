@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package access
+package accessgrant
 
 import (
 	"context"
@@ -24,8 +24,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"go.platform-mesh.io/access-operator/internal/config"
+	"go.platform-mesh.io/access-operator/pkg/config"
 	pmaccessv1alpha1 "go.platform-mesh.io/apis/access/v1alpha1"
+	"go.platform-mesh.io/golang-commons/logger"
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 
 	corev1 "k8s.io/api/core/v1"
@@ -84,10 +85,12 @@ func newFixture(t *testing.T, accessURL string) testFixture {
 	}
 }
 
-// newSubroutine builds a subroutine wired against the given httptest.Server,
-// a fake cluster client seeded with the grant + token Secret, a stubbed
-// SA-token minter, and a stubbed CA-bundle reader.
-func newSubroutine(t *testing.T, srv *httptest.Server, fx testFixture) *AccessHandshakeSubroutine {
+// newReconcilerAndClient builds a Reconciler wired against the given
+// httptest.Server, a fake cluster client seeded with the grant + token
+// Secret, a stubbed SA-token minter, and a stubbed CA-bundle reader.
+// The Reconciler's manager is left nil; tests call r.reconcile() with
+// the fake client directly, bypassing ClusterFromContext.
+func newReconcilerAndClient(t *testing.T, srv *httptest.Server, fx testFixture) (*Reconciler, ctrlruntimeclient.Client) {
 	t.Helper()
 	sch := newTestScheme(t)
 	cl := fake.NewClientBuilder().WithScheme(sch).WithObjects(fx.grant, fx.secret).Build()
@@ -95,17 +98,25 @@ func newSubroutine(t *testing.T, srv *httptest.Server, fx testFixture) *AccessHa
 	cfg := &config.OperatorConfig{}
 	cfg.KCP.ExternalUrl = "https://kcp.pm.example"
 
-	return NewAccessHandshakeSubroutine(cfg, func(context.Context) (ctrlruntimeclient.Client, error) {
-		return cl, nil
-	}).
+	r := NewReconciler(nil, cfg).
 		WithHTTPClient(srv.Client()).
 		WithSATokenMinter(func(context.Context, ctrlruntimeclient.Client, string, string) (string, error) {
 			return "stub-sa-token", nil
 		}).
 		WithCABundleReader(func() ([]byte, error) { return []byte("stub-ca-bundle"), nil })
+	return r, cl
 }
 
-func TestHandshake_200_MarksActive(t *testing.T) {
+func testLog(t *testing.T) *logger.Logger {
+	t.Helper()
+	l, err := logger.New(logger.DefaultConfig())
+	if err != nil {
+		t.Fatalf("logger.New: %v", err)
+	}
+	return l
+}
+
+func TestHandshake_200_MarksConnected(t *testing.T) {
 	var gotBody handshakeBody
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,17 +128,19 @@ func TestHandshake_200_MarksActive(t *testing.T) {
 	defer srv.Close()
 
 	fx := newFixture(t, srv.URL)
-	s := newSubroutine(t, srv, fx)
+	r, cl := newReconcilerAndClient(t, srv, fx)
 
-	if _, err := s.Process(context.Background(), fx.grant); err != nil {
-		t.Fatalf("Process: %v", err)
+	if _, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
-	if fx.grant.Status.Phase != pmaccessv1alpha1.AccessGrantPhaseActive {
-		t.Errorf("Phase = %q, want Active", fx.grant.Status.Phase)
+
+	accepted := apimeta.FindStatusCondition(fx.grant.Status.Conditions, pmaccessv1alpha1.AccessGrantConditionAccepted)
+	if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.Reason != pmaccessv1alpha1.AccessGrantReasonAccepted {
+		t.Errorf("Accepted condition = %+v, want True/Accepted", accepted)
 	}
-	cond := apimeta.FindStatusCondition(fx.grant.Status.Conditions, handshakeReadyConditionType)
-	if cond == nil || cond.Status != metav1.ConditionTrue || cond.Reason != pmaccessv1alpha1.AccessGrantReasonHandshakeSucceeded {
-		t.Errorf("Ready condition = %+v, want True/HandshakeSucceeded", cond)
+	connected := apimeta.FindStatusCondition(fx.grant.Status.Conditions, pmaccessv1alpha1.AccessGrantConditionConnected)
+	if connected == nil || connected.Status != metav1.ConditionTrue || connected.Reason != pmaccessv1alpha1.AccessGrantReasonHandshakeSucceeded {
+		t.Errorf("Connected condition = %+v, want True/HandshakeSucceeded", connected)
 	}
 	if gotAuth == "" || len(gotAuth) < len("Bearer ") || gotAuth[:7] != "Bearer " {
 		t.Errorf("Authorization header = %q, want Bearer <jwt>", gotAuth)
@@ -143,7 +156,7 @@ func TestHandshake_200_MarksActive(t *testing.T) {
 	}
 }
 
-func TestHandshake_403_StaysPendingWithReason(t *testing.T) {
+func TestHandshake_403_StaysUnconnectedWithReason(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		_, _ = w.Write([]byte("InvalidCredential"))
@@ -151,50 +164,44 @@ func TestHandshake_403_StaysPendingWithReason(t *testing.T) {
 	defer srv.Close()
 
 	fx := newFixture(t, srv.URL)
-	s := newSubroutine(t, srv, fx)
+	r, cl := newReconcilerAndClient(t, srv, fx)
 
-	res, err := s.Process(context.Background(), fx.grant)
+	res, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant)
 	if err != nil {
-		t.Fatalf("Process: %v", err)
+		t.Fatalf("reconcile: %v", err)
 	}
-	if fx.grant.Status.Phase == pmaccessv1alpha1.AccessGrantPhaseActive {
-		t.Errorf("Phase must not be Active on 403")
+	if res.RequeueAfter == 0 {
+		t.Errorf("expected RequeueAfter > 0 on 403, got %+v", res)
 	}
-	if !res.IsStopWithRequeue() {
-		t.Errorf("expected StopWithRequeue on 403, got %+v", res)
-	}
-	cond := apimeta.FindStatusCondition(fx.grant.Status.Conditions, handshakeReadyConditionType)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != pmaccessv1alpha1.AccessGrantReasonHandshakeRejected {
-		t.Errorf("Ready condition = %+v, want False/HandshakeRejected", cond)
+	connected := apimeta.FindStatusCondition(fx.grant.Status.Conditions, pmaccessv1alpha1.AccessGrantConditionConnected)
+	if connected == nil || connected.Status != metav1.ConditionFalse || connected.Reason != pmaccessv1alpha1.AccessGrantReasonHandshakeRejected {
+		t.Errorf("Connected condition = %+v, want False/HandshakeRejected", connected)
 	}
 }
 
-func TestHandshake_202_StaysPendingWithReason(t *testing.T) {
+func TestHandshake_202_StaysUnconnectedWithReason(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer srv.Close()
 
 	fx := newFixture(t, srv.URL)
-	s := newSubroutine(t, srv, fx)
+	r, cl := newReconcilerAndClient(t, srv, fx)
 
-	res, err := s.Process(context.Background(), fx.grant)
+	res, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant)
 	if err != nil {
-		t.Fatalf("Process: %v", err)
+		t.Fatalf("reconcile: %v", err)
 	}
-	if fx.grant.Status.Phase == pmaccessv1alpha1.AccessGrantPhaseActive {
-		t.Errorf("Phase must not be Active on 202")
+	if res.RequeueAfter == 0 {
+		t.Errorf("expected RequeueAfter > 0 on 202, got %+v", res)
 	}
-	if !res.IsStopWithRequeue() {
-		t.Errorf("expected StopWithRequeue on 202, got %+v", res)
-	}
-	cond := apimeta.FindStatusCondition(fx.grant.Status.Conditions, handshakeReadyConditionType)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != pmaccessv1alpha1.AccessGrantReasonHandshakePending {
-		t.Errorf("Ready condition = %+v, want False/HandshakePending", cond)
+	connected := apimeta.FindStatusCondition(fx.grant.Status.Conditions, pmaccessv1alpha1.AccessGrantConditionConnected)
+	if connected == nil || connected.Status != metav1.ConditionFalse || connected.Reason != pmaccessv1alpha1.AccessGrantReasonHandshakePending {
+		t.Errorf("Connected condition = %+v, want False/HandshakePending", connected)
 	}
 }
 
-func TestHandshake_InvalidToken_SurfacesRejection(t *testing.T) {
+func TestHandshake_InvalidToken_SurfacesOnAccepted(t *testing.T) {
 	// Serve nothing — the request should never go out.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Errorf("server should not be reached for invalid token")
@@ -209,20 +216,22 @@ func TestHandshake_InvalidToken_SurfacesRejection(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(sch).WithObjects(fx.grant, fx.secret).Build()
 	cfg := &config.OperatorConfig{}
 	cfg.KCP.ExternalUrl = "https://kcp.pm.example"
-	s := NewAccessHandshakeSubroutine(cfg, func(context.Context) (ctrlruntimeclient.Client, error) {
-		return cl, nil
-	}).WithHTTPClient(srv.Client()).
+	r := NewReconciler(nil, cfg).
+		WithHTTPClient(srv.Client()).
 		WithSATokenMinter(func(context.Context, ctrlruntimeclient.Client, string, string) (string, error) {
 			return "stub-sa-token", nil
 		}).
 		WithCABundleReader(func() ([]byte, error) { return nil, nil })
 
-	if _, err := s.Process(context.Background(), fx.grant); err != nil {
-		t.Fatalf("Process: %v", err)
+	if _, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
-	cond := apimeta.FindStatusCondition(fx.grant.Status.Conditions, handshakeReadyConditionType)
-	if cond == nil || cond.Reason != pmaccessv1alpha1.AccessGrantReasonHandshakeRejected {
-		t.Errorf("Ready condition = %+v, want HandshakeRejected", cond)
+	accepted := apimeta.FindStatusCondition(fx.grant.Status.Conditions, pmaccessv1alpha1.AccessGrantConditionAccepted)
+	if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != pmaccessv1alpha1.AccessGrantReasonInvalidAccessToken {
+		t.Errorf("Accepted condition = %+v, want False/InvalidAccessToken", accepted)
+	}
+	if c := apimeta.FindStatusCondition(fx.grant.Status.Conditions, pmaccessv1alpha1.AccessGrantConditionConnected); c != nil {
+		t.Errorf("Connected condition must be absent when spec is not accepted, got %+v", c)
 	}
 }
 
@@ -237,15 +246,13 @@ func TestHandshake_MissingExternalURL_Refuses(t *testing.T) {
 	cl := fake.NewClientBuilder().WithScheme(sch).WithObjects(fx.grant, fx.secret).Build()
 	cfg := &config.OperatorConfig{} // ExternalUrl unset
 
-	s := NewAccessHandshakeSubroutine(cfg, func(context.Context) (ctrlruntimeclient.Client, error) {
-		return cl, nil
-	})
+	r := NewReconciler(nil, cfg)
 
-	if _, err := s.Process(context.Background(), fx.grant); err != nil {
-		t.Fatalf("Process: %v", err)
+	if _, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
-	cond := apimeta.FindStatusCondition(fx.grant.Status.Conditions, handshakeReadyConditionType)
-	if cond == nil || cond.Reason != "MissingExternalKcpURL" {
-		t.Errorf("Ready condition = %+v, want MissingExternalKcpURL", cond)
+	accepted := apimeta.FindStatusCondition(fx.grant.Status.Conditions, pmaccessv1alpha1.AccessGrantConditionAccepted)
+	if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != pmaccessv1alpha1.AccessGrantReasonMissingKcpURL {
+		t.Errorf("Accepted condition = %+v, want False/MissingKcpURL", accepted)
 	}
 }

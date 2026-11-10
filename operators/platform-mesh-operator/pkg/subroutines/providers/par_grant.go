@@ -103,7 +103,7 @@ func (r *PARGrantSubroutine) Process(ctx context.Context, obj ctrlruntimeclient.
 		return subroutines.OK(), nil
 	}
 
-	userWsClient, err := r.getClusterClientFromContext(ctx)
+	cl, err := r.getClusterClientFromContext(ctx)
 	if err != nil {
 		return subroutines.OK(), err
 	}
@@ -115,14 +115,11 @@ func (r *PARGrantSubroutine) Process(ctx context.Context, obj ctrlruntimeclient.
 		key = parAccessTokenSecretKey
 	}
 	srcSecret := &corev1.Secret{}
-	if err := userWsClient.Get(ctx, types.NamespacedName{Name: secretRef.Name, Namespace: secretRef.Namespace}, srcSecret); err != nil {
+	if err := cl.Get(ctx, types.NamespacedName{Name: secretRef.Name, Namespace: secretRef.Namespace}, srcSecret); err != nil {
 		if apierrors.IsNotFound(err) {
-			log.Info().Str("secret", secretRef.Name).Msg("Access-token Secret not found; failing PAR")
-			par.Status.Phase = pmprovidersv1alpha1.ProviderAccessRequestPhaseFailed
 			setPARReadyCondition(par, metav1.ConditionFalse,
 				pmprovidersv1alpha1.ProviderAccessRequestReasonInvalidAccessToken,
 				"referenced access-token Secret does not exist")
-			return subroutines.OK(), nil
 		}
 		return subroutines.OK(), gcerrors.Wrap(err, "get access-token Secret %s/%s", secretRef.Namespace, secretRef.Name)
 	}
@@ -149,7 +146,7 @@ func (r *PARGrantSubroutine) Process(ctx context.Context, obj ctrlruntimeclient.
 	// Fetch the referenced Provider from the user workspace so we can
 	// (later) update its status.remote.
 	provider := &pmprovidersv1alpha1.Provider{}
-	if err := userWsClient.Get(ctx, types.NamespacedName{Name: par.Spec.ProviderRef.Name}, provider); err != nil {
+	if err := cl.Get(ctx, types.NamespacedName{Name: par.Spec.ProviderRef.Name}, provider); err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "get Provider %s", par.Spec.ProviderRef.Name)
 	}
 
@@ -206,7 +203,7 @@ func (r *PARGrantSubroutine) Process(ctx context.Context, obj ctrlruntimeclient.
 	}
 	provider.Status.Remote.TokenID = parsed.TokenID
 	provider.Status.Remote.AccessURL = parsed.URL
-	if err := userWsClient.Status().Update(ctx, provider); err != nil {
+	if err := cl.Status().Update(ctx, provider); err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "update Provider.status.remote for %s", provider.Name)
 	}
 

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cmd
+package main
 
 import (
 	"context"
@@ -23,13 +23,23 @@ import (
 	"os"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"go.platform-mesh.io/access-operator/internal/controller"
-	accesssubs "go.platform-mesh.io/access-operator/pkg/subroutines"
+	"go.platform-mesh.io/access-operator/pkg/config"
+	"go.platform-mesh.io/access-operator/pkg/controllers/accessgrant"
+	"go.platform-mesh.io/access-operator/pkg/kcp"
+	pmaccessv1alpha1 "go.platform-mesh.io/apis/access/v1alpha1"
+	pmprovidersv1alpha1 "go.platform-mesh.io/apis/providers/v1alpha1"
+	pmconfig "go.platform-mesh.io/golang-commons/config"
 	pmcontext "go.platform-mesh.io/golang-commons/context"
+	"go.platform-mesh.io/golang-commons/logger"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,19 +49,69 @@ import (
 	mcmultiprovider "sigs.k8s.io/multicluster-runtime/providers/multi"
 
 	mcapiexportprovider "github.com/kcp-dev/multicluster-provider/apiexport"
+	kcpapisv1alpha1 "github.com/kcp-dev/sdk/apis/apis/v1alpha1"
 
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
+const defaultWaitForKcpAdminKubeconfigPeriod = 15 * time.Second
+
+var (
+	scheme      = runtime.NewScheme()
+	setupLog    logr.Logger
+	operatorCfg config.OperatorConfig
+	defaultCfg  *pmconfig.CommonServiceConfig
+	log         *logger.Logger
+)
+
+var rootCmd = &cobra.Command{
+	Use:   "access-operator",
+	Short: "operator that drives the /access handshake against user-side access SDKs",
+}
+
 var operatorCmd = &cobra.Command{
 	Use:   "operator",
 	Short: "Run the access-operator",
-	Run:   RunController,
+	Run:   runController,
 }
 
-const defaultWaitForKcpAdminKubeconfigPeriod = 15 * time.Second
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
+	utilruntime.Must(corev1.AddToScheme(scheme))
+	utilruntime.Must(pmaccessv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(pmprovidersv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kcpapisv1alpha1.AddToScheme(scheme))
+
+	rootCmd.AddCommand(operatorCmd)
+
+	defaultCfg = pmconfig.NewDefaultConfig()
+	operatorCfg = config.NewOperatorConfig()
+	defaultCfg.AddFlags(rootCmd.PersistentFlags())
+	operatorCfg.AddFlags(operatorCmd.Flags())
+
+	cobra.OnInitialize(initLog)
+}
+
+func initLog() { // coverage-ignore
+	logcfg := logger.DefaultConfig()
+	logcfg.Level = defaultCfg.Log.Level
+	logcfg.NoJSON = defaultCfg.Log.NoJson
+
+	var err error
+	log, err = logger.New(logcfg)
+	if err != nil {
+		panic(err)
+	}
+	ctrl.SetLogger(log.Logr())
+	setupLog = ctrl.Log.WithName("setup")
+}
+
+func main() {
+	cobra.CheckErr(rootCmd.Execute())
+}
+
+func runController(_ *cobra.Command, _ []string) { // coverage-ignore
 	ctrl.SetLogger(log.ComponentLogger("controller-runtime").Logr())
 
 	log.Info().Msg("Starting access-operator")
@@ -112,19 +172,6 @@ func RunController(_ *cobra.Command, _ []string) { // coverage-ignore
 		os.Exit(1)
 	}
 
-	go startAccessProvider(ctx, runtimeClient, mgr)
-
-	setupLog.Info("starting manager")
-	if err := mgr.Start(ctx); err != nil {
-		log.Fatal().Err(err).Msg("problem running manager")
-	}
-}
-
-// startAccessProvider waits for kcp admin reachability, builds the
-// apiexport-provider on access.platform-mesh.io, registers the
-// AccessGrant reconciler, and wires the provider into the manager's
-// multi-provider.
-func startAccessProvider(ctx context.Context, runtimeCl ctrlruntimeclient.Client, mgr mcmanager.Manager) { // coverage-ignore
 	multiProvider := mgr.GetProvider().(*mcmultiprovider.Provider)
 
 	kcpUrl := operatorCfg.KCP.Url
@@ -135,9 +182,9 @@ func startAccessProvider(ctx context.Context, runtimeCl ctrlruntimeclient.Client
 	kcpUrl += fmt.Sprintf("/clusters/%s", operatorCfg.Access.EndpointSliceWorkspace)
 
 	var kcpCfg *rest.Config
-	err := wait.PollUntilContextCancel(ctx, defaultWaitForKcpAdminKubeconfigPeriod, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextCancel(ctx, defaultWaitForKcpAdminKubeconfigPeriod, true, func(ctx context.Context) (bool, error) {
 		var err error
-		kcpCfg, err = accesssubs.BuildKubeconfigFromConfig(ctx, runtimeCl, &operatorCfg.KCP, kcpUrl)
+		kcpCfg, err = kcp.BuildKubeconfigFromConfig(ctx, runtimeClient, &operatorCfg.KCP, kcpUrl)
 		if err != nil {
 			setupLog.Error(err, "waiting for kcp admin kubeconfig")
 		}
@@ -166,13 +213,13 @@ func startAccessProvider(ctx context.Context, runtimeCl ctrlruntimeclient.Client
 		os.Exit(1)
 	}
 
-	rec, err := controller.NewAccessGrantReconciler(mgr, &operatorCfg, defaultCfg)
+	c, err := accessgrant.NewController(mgr, &operatorCfg)
 	if err != nil {
-		setupLog.Error(err, "failed to create AccessGrant reconciler")
+		setupLog.Error(err, "failed to create AccessGrant controller")
 		os.Exit(1)
 	}
-	if err := rec.SetupWithManager(mgr, defaultCfg); err != nil {
-		setupLog.Error(err, "failed to set up AccessGrant reconciler")
+	if err := c.SetupWithManager(mgr, defaultCfg); err != nil {
+		setupLog.Error(err, "failed to set up AccessGrant controller")
 		os.Exit(1)
 	}
 
@@ -180,6 +227,10 @@ func startAccessProvider(ctx context.Context, runtimeCl ctrlruntimeclient.Client
 		setupLog.Error(err, "failed to register apiexport provider")
 		os.Exit(1)
 	}
+	setupLog.Info("apiexport-access-platform-mesh mc provider added")
 
-	setupLog.Info("apiexport-access.platform-mesh.io provider engaged")
+	setupLog.Info("starting manager")
+	if err := mgr.Start(ctx); err != nil {
+		log.Fatal().Err(err).Msg("problem running manager")
+	}
 }

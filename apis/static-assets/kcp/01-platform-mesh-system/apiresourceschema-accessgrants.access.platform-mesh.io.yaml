@@ -15,7 +15,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v261105-72b4f057.accessgrants.access.platform-mesh.io
+  name: v261110-eb4f544e.accessgrants.access.platform-mesh.io
 spec:
   group: access.platform-mesh.io
   names:
@@ -26,8 +26,12 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .status.conditions[?(@.type=='Connected')].status
+      name: Connected
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Connected')].reason
+      name: Reason
+      priority: 1
       type: string
     - jsonPath: .spec.accessURL
       name: AccessURL
@@ -43,7 +47,7 @@ spec:
         Provider's user-side cluster. It is created in the Provider Workspace
         by the provider reconciler on a successful ProviderAccessRequest and
         consumed by access-operator, which runs the /access handshake and
-        marks the grant Active.
+        marks the grant Connected.
 
         AccessGrant is torn down with the Provider Workspace on Provider
         deletion.
@@ -128,7 +132,12 @@ spec:
           description: status defines the observed state of AccessGrant.
           properties:
             conditions:
-              description: conditions represent the current state of the AccessGrant.
+              description: |-
+                conditions represent the current state of the AccessGrant.
+
+                Known condition types are:
+                  - "Accepted": spec validated and local state resolved.
+                  - "Connected": state of the /access connection to the user side.
               items:
                 description: Condition contains details for one aspect of the current
                   state of this API Resource.
@@ -193,9 +202,6 @@ spec:
                 access-operator.
               format: int64
               type: integer
-            phase:
-              description: 'phase summarises reconciliation state: Pending or Active.'
-              type: string
           type: object
       required:
       - spec

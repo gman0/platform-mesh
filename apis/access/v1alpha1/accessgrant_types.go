@@ -21,34 +21,60 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Phase values on AccessGrantStatus.
+// Condition types on AccessGrant.
 const (
-	// AccessGrantPhasePending is the initial phase. access-operator has not
-	// yet completed the /access handshake with the user-side access SDK.
-	AccessGrantPhasePending = "Pending"
+	// AccessGrantConditionAccepted indicates whether access-operator was
+	// able to parse the AccessGrant's spec and resolve the required
+	// local state (mirror access-token Secret, operator config) well
+	// enough to attempt a /access dial.
+	AccessGrantConditionAccepted = "Accepted"
 
-	// AccessGrantPhaseActive means the /access handshake succeeded and the
-	// user-side cluster holds a kubeconfig for the Provider Workspace.
-	AccessGrantPhaseActive = "Active"
+	// AccessGrantConditionConnected indicates the current state of the
+	// connection to the user-side access SDK as observed by the most
+	// recent /access dial.
+	AccessGrantConditionConnected = "Connected"
 )
 
-// Reason labels used on AccessGrant conditions.
+// Reasons for the Accepted condition.
 const (
-	// AccessGrantReasonHandshakePending is set while access-operator is
-	// still attempting the initial /access handshake.
-	AccessGrantReasonHandshakePending = "HandshakePending"
+	// AccessGrantReasonAccepted is set when the spec validated and the
+	// mirror Secret and operator config resolved; the operator will
+	// attempt the /access dial.
+	AccessGrantReasonAccepted = "Accepted"
 
-	// AccessGrantReasonHandshakeSucceeded is set on the Ready condition
-	// after a successful /access 200.
+	// AccessGrantReasonAccessTokenSecretMissing is set when the Secret
+	// named by spec.accessTokenSecretRef is missing or lacks the
+	// expected key.
+	AccessGrantReasonAccessTokenSecretMissing = "AccessTokenSecretMissing"
+
+	// AccessGrantReasonInvalidAccessToken is set when the Secret's
+	// token value does not parse as a pma1 access token.
+	AccessGrantReasonInvalidAccessToken = "InvalidAccessToken"
+
+	// AccessGrantReasonMissingKcpURL is set when the operator has no
+	// --kcp-external-url configured and therefore cannot populate the
+	// handshake body.
+	AccessGrantReasonMissingKcpURL = "MissingKcpURL"
+)
+
+// Reasons for the Connected condition.
+const (
+	// AccessGrantReasonHandshakeSucceeded is set on the Connected
+	// condition after a successful /access 200.
 	AccessGrantReasonHandshakeSucceeded = "HandshakeSucceeded"
 
-	// AccessGrantReasonHandshakeRejected is set when the user-side access
-	// SDK rejected the handshake (403). See the condition message for
-	// detail.
+	// AccessGrantReasonHandshakePending is set while the user-side
+	// access SDK has queued the handshake for manual approval (/access
+	// returned 202).
+	AccessGrantReasonHandshakePending = "HandshakePending"
+
+	// AccessGrantReasonHandshakeRejected is set when the user-side
+	// access SDK rejected the handshake (/access returned 403).
 	AccessGrantReasonHandshakeRejected = "HandshakeRejected"
 
 	// AccessGrantReasonAccessURLUnreachable is set when access-operator
-	// cannot dial the access SDK (TLS, DNS, network).
+	// cannot dial the access SDK (TLS, DNS, network) or /access
+	// returned an unexpected status.
 	AccessGrantReasonAccessURLUnreachable = "AccessURLUnreachable"
 )
 
@@ -102,11 +128,11 @@ type AccessGrantSpec struct {
 
 // AccessGrantStatus defines the observed state of AccessGrant.
 type AccessGrantStatus struct {
-	// phase summarises reconciliation state: Pending or Active.
-	// +optional
-	Phase string `json:"phase,omitempty"`
-
 	// conditions represent the current state of the AccessGrant.
+	//
+	// Known condition types are:
+	//   - "Accepted": spec validated and local state resolved.
+	//   - "Connected": state of the /access connection to the user side.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -121,7 +147,8 @@ type AccessGrantStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced
-// +kubebuilder:printcolumn:JSONPath=".status.phase",name="Phase",type=string
+// +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type=='Connected')].status",name="Connected",type=string
+// +kubebuilder:printcolumn:JSONPath=".status.conditions[?(@.type=='Connected')].reason",name="Reason",type=string,priority=1
 // +kubebuilder:printcolumn:JSONPath=".spec.accessURL",name="AccessURL",type=string,priority=1
 // +kubebuilder:printcolumn:JSONPath=".metadata.creationTimestamp",name="Age",type=date
 
@@ -129,7 +156,7 @@ type AccessGrantStatus struct {
 // Provider's user-side cluster. It is created in the Provider Workspace
 // by the provider reconciler on a successful ProviderAccessRequest and
 // consumed by access-operator, which runs the /access handshake and
-// marks the grant Active.
+// marks the grant Connected.
 //
 // AccessGrant is torn down with the Provider Workspace on Provider
 // deletion.

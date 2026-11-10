@@ -34,8 +34,7 @@ type KCPConfig struct {
 	// ExternalUrl is the publicly-reachable kcp URL propagated to
 	// user-side clusters in the /access handshake body. Distinct from
 	// Url which is the operator's internal (in-cluster) view. Required
-	// for the handshake subroutine; the operator refuses to run it if
-	// unset.
+	// for the handshake; the operator refuses to dial if unset.
 	ExternalUrl string
 
 	// CABundlePath is the path to a PEM-encoded CA bundle mounted into
@@ -53,20 +52,10 @@ type AccessAPIExportConfig struct {
 	EndpointSliceWorkspace string
 }
 
-// HandshakeSubroutineConfig toggles the AccessGrant handshake subroutine.
-type HandshakeSubroutineConfig struct {
-	Enabled bool
-}
-
-type SubroutinesConfig struct {
-	Handshake HandshakeSubroutineConfig
-}
-
 // OperatorConfig is the access-operator top-level config.
 type OperatorConfig struct {
-	KCP         KCPConfig
-	Access      AccessAPIExportConfig
-	Subroutines SubroutinesConfig
+	KCP    KCPConfig
+	Access AccessAPIExportConfig
 }
 
 func NewOperatorConfig() OperatorConfig {
@@ -81,9 +70,6 @@ func NewOperatorConfig() OperatorConfig {
 		Access: AccessAPIExportConfig{
 			EndpointSliceName:      "access.platform-mesh.io",
 			EndpointSliceWorkspace: "root:platform-mesh-system",
-		},
-		Subroutines: SubroutinesConfig{
-			Handshake: HandshakeSubroutineConfig{Enabled: true},
 		},
 	}
 }
@@ -100,6 +86,4 @@ func (c *OperatorConfig) AddFlags(fs *pflag.FlagSet) {
 
 	fs.StringVar(&c.Access.EndpointSliceName, "access-apiexport-endpointslice-name", c.Access.EndpointSliceName, "Access APIExportEndpointSlice name")
 	fs.StringVar(&c.Access.EndpointSliceWorkspace, "access-apiexport-endpointslice-workspace", c.Access.EndpointSliceWorkspace, "Access APIExportEndpointSlice workspace")
-
-	fs.BoolVar(&c.Subroutines.Handshake.Enabled, "subroutines-access-handshake-enabled", c.Subroutines.Handshake.Enabled, "Enable AccessGrant handshake subroutine")
 }

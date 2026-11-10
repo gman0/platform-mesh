@@ -14,19 +14,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package subroutines hosts access-operator-local helpers that don't fit
-// into a specific subroutine subpackage. The kcp-admin plumbing here is
-// a near-duplicate of the equivalent code in platform-mesh-operator.
+// Package kcp hosts helpers for reaching PM's kcp admin plane. The
+// code here is a near-duplicate of the equivalent in
+// platform-mesh-operator.
 //
 // TODO(stage-5): extract into a shared module (golang-commons/kcp-admin
 // or similar) so both operators consume one implementation.
-package subroutines
+package kcp
 
 import (
 	"context"
 	"fmt"
 
-	"go.platform-mesh.io/access-operator/internal/config"
+	"go.platform-mesh.io/access-operator/pkg/config"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
