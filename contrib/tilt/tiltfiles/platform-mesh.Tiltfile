@@ -136,8 +136,6 @@ service(
     TEMPLATE_VARS,
     path="operators/access-operator",
     deps=GO_DEPS,
-    resource_deps=["platformmesh-ready"],
-    overrides={"kcp": {"frontProxyPort": str(PORT)}},
 )
 service("account-operator", NAMESPACE, TEMPLATE_VARS, path="operators/account-operator", deps=GO_DEPS)
 service(
