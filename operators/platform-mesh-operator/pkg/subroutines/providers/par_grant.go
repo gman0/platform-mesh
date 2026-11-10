@@ -99,7 +99,7 @@ func (r *PARGrantSubroutine) Process(ctx context.Context, obj ctrlruntimeclient.
 	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
 	par := obj.(*pmprovidersv1alpha1.ProviderAccessRequest)
 
-	if isPARTerminal(par) {
+	if isPARTerminalPhase(par) {
 		return subroutines.OK(), nil
 	}
 

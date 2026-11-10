@@ -89,7 +89,15 @@ func NewPARReconciler(mgr mcmanager.Manager, operatorCfg *config.OperatorConfig,
 	var subs []subroutines.Subroutine
 
 	if operatorCfg.Subroutines.PAR.Resolve.Enabled {
-		subs = append(subs, pmsubs.NewPARResolveSubroutine(localClient))
+		subs = append(subs, pmsubs.NewPARResolveSubroutine(
+			func(ctx context.Context) (ctrlruntimeclient.Client, error) {
+				cluster, err := mgr.ClusterFromContext(ctx)
+				if err != nil {
+					return nil, err
+				}
+				return cluster.GetClient(), nil
+			},
+		))
 	}
 	if operatorCfg.Subroutines.PAR.Grant.Enabled {
 		subs = append(subs, pmsubs.NewPARGrantSubroutine(

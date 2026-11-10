@@ -49,11 +49,11 @@ const (
 // spec.remote set. On success it returns OK and lets the next subroutine
 // (par_grant.go) take over the handshake setup.
 type PARResolveSubroutine struct {
-	client ctrlruntimeclient.Client
+	getClusterClientFromContext func(context.Context) (ctrlruntimeclient.Client, error)
 }
 
-func NewPARResolveSubroutine(cl ctrlruntimeclient.Client) *PARResolveSubroutine {
-	return &PARResolveSubroutine{client: cl}
+func NewPARResolveSubroutine(getClusterClientFromContext func(context.Context) (ctrlruntimeclient.Client, error)) *PARResolveSubroutine {
+	return &PARResolveSubroutine{getClusterClientFromContext: getClusterClientFromContext}
 }
 
 func (r *PARResolveSubroutine) GetName() string {
@@ -64,16 +64,21 @@ func (r *PARResolveSubroutine) Process(ctx context.Context, obj ctrlruntimeclien
 	log := logger.LoadLoggerFromContext(ctx).ChildLogger("subroutine", r.GetName())
 	par := obj.(*pmprovidersv1alpha1.ProviderAccessRequest)
 
-	if isPARTerminal(par) {
+	if isPARTerminalPhase(par) {
 		return subroutines.OK(), nil
 	}
 	if par.Status.Phase == "" {
 		par.Status.Phase = pmprovidersv1alpha1.ProviderAccessRequestPhasePending
 	}
 
+	cl, err := r.getClusterClientFromContext(ctx)
+	if err != nil {
+		return subroutines.OK(), err
+	}
+
 	providerName := par.Spec.ProviderRef.Name
 	provider := &pmprovidersv1alpha1.Provider{}
-	if err := r.client.Get(ctx, types.NamespacedName{Name: providerName}, provider); err != nil {
+	if err := cl.Get(ctx, types.NamespacedName{Name: providerName}, provider); err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info().Str("provider", providerName).Msg("Provider not found yet, requeuing")
 			setPARReadyCondition(par, metav1.ConditionFalse,
@@ -104,9 +109,9 @@ func (r *PARResolveSubroutine) Finalizers(_ ctrlruntimeclient.Object) []string {
 	return []string{}
 }
 
-// isPARTerminal reports whether the PAR has reached a terminal phase and
+// isPARTerminalPhase reports whether the PAR has reached a terminal phase and
 // should be left untouched on subsequent reconciles.
-func isPARTerminal(par *pmprovidersv1alpha1.ProviderAccessRequest) bool {
+func isPARTerminalPhase(par *pmprovidersv1alpha1.ProviderAccessRequest) bool {
 	switch par.Status.Phase {
 	case pmprovidersv1alpha1.ProviderAccessRequestPhaseCompleted,
 		pmprovidersv1alpha1.ProviderAccessRequestPhaseFailed:
