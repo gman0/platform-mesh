@@ -79,17 +79,16 @@ httpbin = chart(
     ],
 )
 k8s_yaml(httpbin)
-# CRDs get their own resource so restarting the operator can't GC them.
-is_httpbin_crd = kind_in(["CustomResourceDefinition"])
+is_crd = kind_in(["CustomResourceDefinition"])
 k8s_resource(
     new_name="example-httpbin-operator-crds",
-    objects=select_objects(httpbin, is_httpbin_crd),
+    objects=select_objects(httpbin, is_crd),
     resource_deps=["httpbin-namespace"],
     labels=["e2e"],
 )
 k8s_resource(
     "example-httpbin-operator",
-    objects=select_objects(httpbin, lambda o: not is_httpbin_crd(o)),
+    objects=select_objects(httpbin, lambda o: not is_crd(o)),
     resource_deps=["httpbin-namespace", "api-syncagent-crds", "gateway", "example-httpbin-operator-crds"],
     labels=["e2e"],
 )
