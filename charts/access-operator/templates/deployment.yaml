@@ -50,23 +50,22 @@ spec:
               port: health
           args:
             - operator
+            - --kcp-kubeconfig=/api-kubeconfig/kubeconfig
             - --kcp-external-url={{ required "kcp.externalUrl is required" .Values.kcp.externalUrl }}
             - --kcp-ca-bundle-path=/kcp-ca/{{ .Values.kcp.caBundleSecretKey }}
-            - --kcp-namespace={{ .Values.kcp.namespace }}
-            - --kcp-front-proxy-name={{ .Values.kcp.frontProxyName }}
-            - --kcp-front-proxy-port={{ .Values.kcp.frontProxyPort }}
-            {{- if .Values.kcp.url }}
-            - --kcp-url={{ .Values.kcp.url }}
-            {{- end }}
-            - --kcp-cluster-admin-secret-name={{ .Values.kcp.clusterAdminSecretName }}
-            - --access-apiexport-endpointslice-name={{ .Values.access.endpointSliceName }}
-            - --access-apiexport-endpointslice-workspace={{ .Values.access.endpointSliceWorkspace }}
+            - --kcp-api-export-endpoint-slice-name={{ .Values.kcp.apiExportEndpointSliceName }}
             - --leader-elect={{ .Values.operator.leaderElect }}
           volumeMounts:
+            - name: kcp-kubeconfig
+              mountPath: /api-kubeconfig
+              readOnly: true
             - name: kcp-ca
               mountPath: /kcp-ca
               readOnly: true
       volumes:
+        - name: kcp-kubeconfig
+          secret:
+            secretName: {{ required "kubeconfigSecret is required" .Values.kubeconfigSecret }}
         - name: kcp-ca
           secret:
             secretName: {{ .Values.kcp.caBundleSecret }}

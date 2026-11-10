@@ -19,7 +19,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"os"
 	"time"
 
@@ -28,7 +27,6 @@ import (
 
 	"go.platform-mesh.io/access-operator/pkg/config"
 	"go.platform-mesh.io/access-operator/pkg/controllers/accessgrant"
-	"go.platform-mesh.io/access-operator/pkg/kcp"
 	pmaccessv1alpha1 "go.platform-mesh.io/apis/access/v1alpha1"
 	pmprovidersv1alpha1 "go.platform-mesh.io/apis/providers/v1alpha1"
 	pmconfig "go.platform-mesh.io/golang-commons/config"
@@ -41,8 +39,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
-	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
@@ -54,7 +52,7 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
-const defaultWaitForKcpAdminKubeconfigPeriod = 15 * time.Second
+const defaultWaitForApiexportProviderPeriod = 15 * time.Second
 
 var (
 	scheme      = runtime.NewScheme()
@@ -130,14 +128,10 @@ func runController(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 
 	restCfg := ctrl.GetConfigOrDie()
-	runtimeClient, err := ctrlruntimeclient.New(restCfg, ctrlruntimeclient.Options{Scheme: scheme})
-	if err != nil {
-		setupLog.Error(err, "unable to create local-cluster client")
-		os.Exit(1)
-	}
 
 	var leaderCfg *rest.Config
 	if defaultCfg.LeaderElectionEnabled {
+		var err error
 		leaderCfg, err = rest.InClusterConfig()
 		if err != nil {
 			log.Fatal().Err(err).Msg("unable to get in-cluster config")
@@ -174,37 +168,21 @@ func runController(_ *cobra.Command, _ []string) { // coverage-ignore
 
 	multiProvider := mgr.GetProvider().(*mcmultiprovider.Provider)
 
-	kcpUrl := operatorCfg.KCP.Url
-	if kcpUrl == "" {
-		kcpUrl = fmt.Sprintf("https://%s-front-proxy.%s:%s",
-			operatorCfg.KCP.FrontProxyName, operatorCfg.KCP.Namespace, operatorCfg.KCP.FrontProxyPort)
-	}
-	kcpUrl += fmt.Sprintf("/clusters/%s", operatorCfg.Access.EndpointSliceWorkspace)
-
-	var kcpCfg *rest.Config
-	err = wait.PollUntilContextCancel(ctx, defaultWaitForKcpAdminKubeconfigPeriod, true, func(ctx context.Context) (bool, error) {
-		var err error
-		kcpCfg, err = kcp.BuildKubeconfigFromConfig(ctx, runtimeClient, &operatorCfg.KCP, kcpUrl)
-		if err != nil {
-			setupLog.Error(err, "waiting for kcp admin kubeconfig")
-		}
-		return err == nil, nil
-	})
+	kcpCfg, err := clientcmd.BuildConfigFromFlags("", operatorCfg.KCP.Kubeconfig)
 	if err != nil {
-		setupLog.Error(err, "failed to retrieve kcp admin config")
+		setupLog.Error(err, "failed to load kcp kubeconfig", "path", operatorCfg.KCP.Kubeconfig)
 		os.Exit(1)
 	}
 
 	setupLog.Info("starting apiexport-access.platform-mesh.io provider")
 	var provider *mcapiexportprovider.Provider
-	err = wait.PollUntilContextCancel(ctx, defaultWaitForKcpAdminKubeconfigPeriod, true, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextCancel(ctx, defaultWaitForApiexportProviderPeriod, true, func(ctx context.Context) (bool, error) {
 		var err error
-		provider, err = mcapiexportprovider.New(kcpCfg, operatorCfg.Access.EndpointSliceName, mcapiexportprovider.Options{
+		provider, err = mcapiexportprovider.New(kcpCfg, operatorCfg.KCP.APIExportEndpointSliceName, mcapiexportprovider.Options{
 			Scheme: scheme,
 		})
 		if err != nil {
-			setupLog.Error(err, "failed to create apiexport provider", "apiexportendpointslice",
-				fmt.Sprintf("%s:%s", operatorCfg.Access.EndpointSliceWorkspace, operatorCfg.Access.EndpointSliceName))
+			setupLog.Error(err, "failed to create apiexport provider", "endpointslice", operatorCfg.KCP.APIExportEndpointSliceName)
 		}
 		return err == nil, nil
 	})

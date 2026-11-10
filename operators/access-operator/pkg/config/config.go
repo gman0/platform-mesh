@@ -20,21 +20,29 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// KCPConfig carries the details needed to reach PM's kcp admin plane.
-// Mirrored on the platform-mesh-operator config of the same name so both
-// operators can share kcp admin plumbing without a separate helper.
+// KCPConfig carries the operator's view of PM's kcp admin plane.
+//
+// The operator loads Kubeconfig from a file mounted into the Pod; the
+// Secret is provisioned and renewed by platform-mesh-operator's
+// ProvidersecretSubroutine (see DefaultProviderConnections, the
+// "access-operator-kubeconfig" entry).
+//
+// ExternalUrl and CABundlePath come from a different source — they are
+// not the operator's own credential, but values propagated into the
+// /access handshake body so the user-side cluster can trust PM's kcp.
 type KCPConfig struct {
-	Url                    string
-	Namespace              string
-	RootShardName          string
-	FrontProxyName         string
-	FrontProxyPort         string
-	ClusterAdminSecretName string
+	// Kubeconfig is the on-disk path to the operator's kcp kubeconfig.
+	Kubeconfig string
+
+	// APIExportEndpointSliceName is the name of the
+	// APIExportEndpointSlice the operator engages via its
+	// apiexport-provider. Must match the APIExport the kubeconfig is
+	// scoped to.
+	APIExportEndpointSliceName string
 
 	// ExternalUrl is the publicly-reachable kcp URL propagated to
-	// user-side clusters in the /access handshake body. Distinct from
-	// Url which is the operator's internal (in-cluster) view. Required
-	// for the handshake; the operator refuses to dial if unset.
+	// user-side clusters in the /access handshake body. Required for
+	// the handshake; the operator refuses to dial if unset.
 	ExternalUrl string
 
 	// CABundlePath is the path to a PEM-encoded CA bundle mounted into
@@ -43,47 +51,22 @@ type KCPConfig struct {
 	CABundlePath string
 }
 
-// AccessAPIExportConfig points at the APIExportEndpointSlice that feeds
-// AccessGrants from every Provider Workspace into this operator's
-// manager. The Name and Workspace defaults match the apigen output in
-// Taskfile.yaml.
-type AccessAPIExportConfig struct {
-	EndpointSliceName      string
-	EndpointSliceWorkspace string
-}
-
 // OperatorConfig is the access-operator top-level config.
 type OperatorConfig struct {
-	KCP    KCPConfig
-	Access AccessAPIExportConfig
+	KCP KCPConfig
 }
 
 func NewOperatorConfig() OperatorConfig {
 	return OperatorConfig{
 		KCP: KCPConfig{
-			Namespace:              "platform-mesh-system",
-			RootShardName:          "root",
-			FrontProxyName:         "frontproxy",
-			FrontProxyPort:         "8443",
-			ClusterAdminSecretName: "kcp-cluster-admin-client-cert",
-		},
-		Access: AccessAPIExportConfig{
-			EndpointSliceName:      "access.platform-mesh.io",
-			EndpointSliceWorkspace: "root:platform-mesh-system",
+			APIExportEndpointSliceName: "access.platform-mesh.io",
 		},
 	}
 }
 
 func (c *OperatorConfig) AddFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&c.KCP.Url, "kcp-url", c.KCP.Url, "Set KCP URL")
-	fs.StringVar(&c.KCP.Namespace, "kcp-namespace", c.KCP.Namespace, "Set KCP namespace")
-	fs.StringVar(&c.KCP.RootShardName, "kcp-root-shard-name", c.KCP.RootShardName, "Set KCP root shard name")
-	fs.StringVar(&c.KCP.FrontProxyName, "kcp-front-proxy-name", c.KCP.FrontProxyName, "Set KCP front-proxy name")
-	fs.StringVar(&c.KCP.FrontProxyPort, "kcp-front-proxy-port", c.KCP.FrontProxyPort, "Set KCP front-proxy port")
-	fs.StringVar(&c.KCP.ClusterAdminSecretName, "kcp-cluster-admin-secret-name", c.KCP.ClusterAdminSecretName, "Set cluster-admin secret name")
+	fs.StringVar(&c.KCP.Kubeconfig, "kcp-kubeconfig", c.KCP.Kubeconfig, "Path to the operator's kcp kubeconfig, mounted from a Secret provisioned by platform-mesh-operator")
+	fs.StringVar(&c.KCP.APIExportEndpointSliceName, "kcp-api-export-endpoint-slice-name", c.KCP.APIExportEndpointSliceName, "Name of the APIExportEndpointSlice the apiexport-provider engages")
 	fs.StringVar(&c.KCP.ExternalUrl, "kcp-external-url", c.KCP.ExternalUrl, "Publicly-reachable kcp URL propagated into /access handshake body")
 	fs.StringVar(&c.KCP.CABundlePath, "kcp-ca-bundle-path", c.KCP.CABundlePath, "Path to a PEM-encoded kcp CA bundle, mounted into the operator and propagated into /access handshake body")
-
-	fs.StringVar(&c.Access.EndpointSliceName, "access-apiexport-endpointslice-name", c.Access.EndpointSliceName, "Access APIExportEndpointSlice name")
-	fs.StringVar(&c.Access.EndpointSliceWorkspace, "access-apiexport-endpointslice-workspace", c.Access.EndpointSliceWorkspace, "Access APIExportEndpointSlice workspace")
 }
