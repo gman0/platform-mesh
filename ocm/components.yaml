@@ -50,8 +50,18 @@ components:
   apis: # imports golang-commons and subroutines
     path: apis
     library: true
+  protocol:
+    path: protocol
+    library: true
+  sdk:
+    path: sdk
+    library: true
 
   # --- operators -------------------------------------------------------------
+  access-operator:
+    path: operators/access-operator
+    image: access-operator
+    chart: charts/access-operator
   account-operator:
     path: operators/account-operator
     image: account-operator
