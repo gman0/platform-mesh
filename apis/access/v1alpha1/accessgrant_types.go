@@ -76,6 +76,11 @@ const (
 	// cannot dial the access SDK (TLS, DNS, network) or /access
 	// returned an unexpected status.
 	AccessGrantReasonAccessURLUnreachable = "AccessURLUnreachable"
+
+	// AccessGrantReasonSATokenPending indicates the k8s SA-token
+	// controller has not yet populated the SA-token Secret
+	// access-operator created in the Provider Workspace.
+	AccessGrantReasonSATokenPending = "SATokenPending"
 )
 
 // AccessTokenSecretRef references a Secret in the same namespace as the
@@ -98,9 +103,9 @@ type AccessTokenSecretRef struct {
 // by access-operator to drive the /access handshake.
 type AccessGrantSpec struct {
 	// saRef references the ServiceAccount, in the same namespace as this
-	// AccessGrant, that access-operator mints tokens for via TokenRequest.
-	// The minted SA token is delivered to the user-side cluster in the
-	// /access request body.
+	// AccessGrant, that access-operator ensures an SA-token Secret for
+	// and reads the bearer token from. The token is delivered to the
+	// user-side cluster in the /access request body.
 	// +required
 	SARef corev1.LocalObjectReference `json:"saRef"`
 

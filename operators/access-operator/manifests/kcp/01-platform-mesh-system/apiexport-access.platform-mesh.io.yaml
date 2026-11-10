@@ -23,20 +23,21 @@ spec:
     schema: v261105-72b4f057.accessgrants.access.platform-mesh.io
     storage:
       crd: {}
-  # access-operator reads the mirror access-token Secret and mints a
-  # ServiceAccount token inside each Provider Workspace that binds this
-  # APIExport. Both claims must be accepted on the per-workspace
-  # APIBinding; see par_grant.go in platform-mesh-operator for the
-  # auto-accept path.
+  # access-operator reads the mirror access-token Secret and manages
+  # an SA-token Secret (kubernetes.io/service-account-token shape) in
+  # each Provider Workspace that binds this APIExport. Subresource
+  # claims — the cleaner path via serviceaccounts/token:create — are
+  # not yet supported on tagged kcp releases, so SA-token Secrets are
+  # the only workable option today.
+  #
+  # Must be accepted on each per-workspace APIBinding; see par_grant.go
+  # in platform-mesh-operator for the auto-accept path.
   permissionClaims:
     - group: ""
       resource: secrets
       identityHash: ""
       verbs:
         - get
-    - group: ""
-      resource: serviceaccounts/token
-      identityHash: ""
-      verbs:
         - create
+        - delete
 status: {}

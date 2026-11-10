@@ -47,10 +47,11 @@ const (
 	// Picked to be long enough that a user noticing a misconfiguration
 	// has time to fix it, short enough that transient network blips
 	// resolve in seconds.
-	retryUnreachable = 30 * time.Second
-	retryRejected    = 60 * time.Second
-	retry202         = 10 * time.Second
-	retryOther       = 30 * time.Second
+	retryUnreachable  = 30 * time.Second
+	retryRejected     = 60 * time.Second
+	retry202          = 10 * time.Second
+	retryOther        = 30 * time.Second
+	retrySATokenEmpty = 2 * time.Second
 
 	// httpTimeout is the POST timeout per handshake attempt. Short —
 	// /access returns an ack, not a stream.
@@ -60,10 +61,11 @@ const (
 // Reconciler drives the /access handshake for an AccessGrant.
 //
 // It reads the mirror access-token Secret, parses the pma1.<...> wire
-// string, mints a ServiceAccount token via TokenRequest, signs a JWT
-// call credential, and POSTs the handshake. On HTTP 200 it marks the
-// AccessGrant Connected; 202 / 403 / network failures stay unconnected
-// with a Connected condition reason and a scheduled requeue.
+// string, ensures an SA-token Secret for the Provider Workspace's SA,
+// signs a JWT call credential, and POSTs the handshake. On HTTP 200
+// it marks the AccessGrant Connected; 202 / 403 / network failures
+// stay unconnected with a Connected condition reason and a scheduled
+// requeue.
 //
 // All kcp reads/writes go through the mc-runtime cluster client the
 // manager hands in via mgr.ClusterFromContext — the AccessGrant and
@@ -202,10 +204,19 @@ func (r *Reconciler) reconcile(ctx context.Context, log *logger.Logger, cl ctrlr
 		pmaccessv1alpha1.AccessGrantReasonAccepted,
 		"spec validated; attempting /access handshake")
 
-	// Mint SA token against kcp for this workspace's SA.
+	// Ensure an SA-token Secret for the Provider Workspace's SA and
+	// read back its populated token. Empty-string + nil-error means
+	// the k8s SA-token controller hasn't populated the Secret yet;
+	// requeue briefly.
 	saToken, err := r.mintSAToken(ctx, cl, grant.Spec.SARef.Name, grant.Namespace)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("mint SA token for %s/%s: %w", grant.Namespace, grant.Spec.SARef.Name, err)
+	}
+	if saToken == "" {
+		setConnected(grant, metav1.ConditionFalse,
+			pmaccessv1alpha1.AccessGrantReasonSATokenPending,
+			"waiting for k8s SA-token controller to populate the SA-token Secret")
+		return ctrl.Result{RequeueAfter: retrySATokenEmpty}, nil
 	}
 
 	caBundle, err := r.readCABundle()

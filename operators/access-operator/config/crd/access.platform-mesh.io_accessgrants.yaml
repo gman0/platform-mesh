@@ -111,9 +111,9 @@ spec:
               saRef:
                 description: |-
                   saRef references the ServiceAccount, in the same namespace as this
-                  AccessGrant, that access-operator mints tokens for via TokenRequest.
-                  The minted SA token is delivered to the user-side cluster in the
-                  /access request body.
+                  AccessGrant, that access-operator ensures an SA-token Secret for
+                  and reads the bearer token from. The token is delivered to the
+                  user-side cluster in the /access request body.
                 properties:
                   name:
                     default: ""

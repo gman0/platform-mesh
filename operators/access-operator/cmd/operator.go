@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package cmd
 
 import (
 	"context"
@@ -105,7 +105,8 @@ func initLog() { // coverage-ignore
 	setupLog = ctrl.Log.WithName("setup")
 }
 
-func main() {
+// Execute is the entrypoint called from the operator's main package.
+func Execute() {
 	cobra.CheckErr(rootCmd.Execute())
 }
 

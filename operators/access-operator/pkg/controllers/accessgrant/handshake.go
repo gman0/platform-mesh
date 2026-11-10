@@ -23,9 +23,10 @@ import (
 	"fmt"
 	"net/http"
 
-	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -36,20 +37,53 @@ type handshakeBody struct {
 	SAToken     string `json:"saToken"`
 }
 
-// SATokenMinter mints a ServiceAccount token via the TokenRequest
-// subresource. Extracted as a function type so tests can stub it
-// without needing fake-client subresource support.
+// SATokenMinter returns a bearer token for the named ServiceAccount.
+// A non-nil nil-error empty string means the token is not yet
+// available and the caller should requeue; non-empty string means
+// success.
+//
+// Extracted as a function type so tests can stub it.
 type SATokenMinter func(ctx context.Context, cl ctrlruntimeclient.Client, saName, saNamespace string) (string, error)
 
-// defaultSATokenMinter is the production SATokenMinter. It POSTs a
-// TokenRequest against the ServiceAccount's token subresource.
+// saTokenSecretName derives the Secret name access-operator uses to
+// hold an SA-token Secret for the named ServiceAccount.
+func saTokenSecretName(saName string) string {
+	return saName + "-access-operator-token"
+}
+
+// defaultSATokenMinter is the production SATokenMinter. It ensures a
+// kubernetes.io/service-account-token Secret exists for the SA in the
+// Provider Workspace and returns its populated token. If the token
+// field is not yet populated by the k8s SA-token controller it
+// returns ("", nil) so the caller can requeue instead of blocking.
+//
+// TokenRequest would be cleaner but requires kcp to support
+// subresource PermissionClaims — see RFC 012. Until a tagged kcp
+// release ships that, long-lived SA-token Secrets are the only path.
 func defaultSATokenMinter(ctx context.Context, cl ctrlruntimeclient.Client, saName, saNamespace string) (string, error) {
-	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: saName, Namespace: saNamespace}}
-	treq := &authenticationv1.TokenRequest{}
-	if err := cl.SubResource("token").Create(ctx, sa, treq); err != nil {
-		return "", err
+	name := saTokenSecretName(saName)
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: saNamespace,
+			Annotations: map[string]string{
+				corev1.ServiceAccountNameKey: saName,
+			},
+		},
+		Type: corev1.SecretTypeServiceAccountToken,
 	}
-	return treq.Status.Token, nil
+	if err := cl.Create(ctx, sec); err != nil && !apierrors.IsAlreadyExists(err) {
+		return "", fmt.Errorf("create SA-token Secret %s/%s: %w", saNamespace, name, err)
+	}
+	fresh := &corev1.Secret{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: name, Namespace: saNamespace}, fresh); err != nil {
+		return "", fmt.Errorf("get SA-token Secret %s/%s: %w", saNamespace, name, err)
+	}
+	tok := fresh.Data[corev1.ServiceAccountTokenKey]
+	if len(tok) == 0 {
+		return "", nil
+	}
+	return string(tok), nil
 }
 
 // httpClientFor returns an http.Client that verifies the /access server

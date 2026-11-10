@@ -15,7 +15,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v261110-eb4f544e.accessgrants.access.platform-mesh.io
+  name: v261110-3c51f8b2.accessgrants.access.platform-mesh.io
 spec:
   group: access.platform-mesh.io
   names:
@@ -108,9 +108,9 @@ spec:
             saRef:
               description: |-
                 saRef references the ServiceAccount, in the same namespace as this
-                AccessGrant, that access-operator mints tokens for via TokenRequest.
-                The minted SA token is delivered to the user-side cluster in the
-                /access request body.
+                AccessGrant, that access-operator ensures an SA-token Secret for
+                and reads the bearer token from. The token is delivered to the
+                user-side cluster in the /access request body.
               properties:
                 name:
                   default: ""
