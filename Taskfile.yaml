@@ -90,9 +90,9 @@ vars:
   # taskfile are not visible.
   RENOVATE_IMAGE: ghcr.io/renovatebot/renovate:44.202.1
 
-# to disable BUILDKIT for tilt when on podman
-BUILDKIT:
-  sh: 'docker -v 2>/dev/null | grep -q "^Docker version" && echo 1 || echo 0'
+  # to disable BUILDKIT for tilt when on podman
+  BUILDKIT:
+    sh: 'docker -v 2>/dev/null | grep -q "^Docker version" && echo 1 || echo 0'
 
 tasks:
   default:
