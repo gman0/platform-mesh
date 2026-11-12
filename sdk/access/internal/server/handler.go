@@ -46,6 +46,8 @@ import (
 // is written into the owned Secret.
 const KubeconfigSecretKey = "kubeconfig"
 
+const AccessOperatorLabelKey = "access-sdk.platform-mesh.io/kubeconfig"
+
 // Handler serves POST /v1/access against the user-side cluster. On a
 // verified handshake it writes the delivered kubeconfig as a Secret
 // owned by a freshly-created Access CR, and responds 200 empty.
@@ -204,6 +206,10 @@ func (h *Handler) admit(ctx context.Context, identity *accessv1alpha1.AccessIden
 		if err := controllerutil.SetControllerReference(access, kcSecret, h.Scheme); err != nil {
 			return err
 		}
+		if kcSecret.Labels == nil {
+			kcSecret.Labels = map[string]string{}
+		}
+		kcSecret.Labels[AccessOperatorLabelKey] = "true"
 		if kcSecret.Data == nil {
 			kcSecret.Data = map[string][]byte{}
 		}
