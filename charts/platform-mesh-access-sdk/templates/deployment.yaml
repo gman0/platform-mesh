@@ -32,7 +32,7 @@ spec:
       containers:
         - name: manager
           image: {{ $imageRef }}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: access
               containerPort: {{ .Values.accessPort }}

@@ -154,7 +154,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	result, dialErr := r.reconcile(ctx, log, cl, grant)
+	result, dialErr := r.reconcile(ctx, log, cl, grant, string(req.ClusterName))
 	grant.Status.ObservedGeneration = grant.Generation
 
 	if err := cl.Status().Update(ctx, grant); err != nil {
@@ -170,7 +170,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 // status conditions in-place. The returned ctrl.Result carries the
 // requeue cadence; the error is for genuinely transient infra failures
 // (API read/write issues the status update should not swallow).
-func (r *Reconciler) reconcile(ctx context.Context, log *logger.Logger, cl ctrlruntimeclient.Client, grant *pmaccessv1alpha1.AccessGrant) (ctrl.Result, error) {
+func (r *Reconciler) reconcile(ctx context.Context, log *logger.Logger, cl ctrlruntimeclient.Client, grant *pmaccessv1alpha1.AccessGrant, clusterName string) (ctrl.Result, error) {
 	if r.cfg.KCP.ExternalUrl == "" {
 		setAccepted(grant, metav1.ConditionFalse,
 			pmaccessv1alpha1.AccessGrantReasonMissingKcpURL,
@@ -263,8 +263,12 @@ func (r *Reconciler) reconcile(ctx context.Context, log *logger.Logger, cl ctrlr
 		version = picked
 	}
 
+	kcpURL, err := url.JoinPath(r.cfg.KCP.ExternalUrl, "clusters", clusterName)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("build kcp workspace URL: %w", err)
+	}
 	body := pmaccessv1.HandshakeRequest{
-		KcpURL:      r.cfg.KCP.ExternalUrl,
+		KcpURL:      kcpURL,
 		KcpCABundle: string(caBundle),
 		SAToken:     saToken,
 	}
