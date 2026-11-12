@@ -21,11 +21,13 @@ tls:
   # -- Name of the cert-manager Certificate / resulting Secret holding
   # the TLS cert+key for /access. Created by the chart below.
   secretName: platform-mesh-access-tls
-  # -- DNS names + IPs covered by the TLS cert. At minimum the service
+  # -- DNS names covered by the TLS cert. At minimum the service
   # DNS name should be here; add external hostnames (if ingress is used)
   # to the list.
   dnsNames:
     - platform-mesh-access.platform-mesh-system.svc
+  # -- IP addresses covered by the TLS cert.
+  ipAddresses: []
   # -- cert-manager ClusterIssuer used to issue the Certificate. Leave
   # empty to skip Certificate creation (user mounts an externally
   # managed Secret under the configured secretName).
