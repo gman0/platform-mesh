@@ -17,9 +17,12 @@ limitations under the License.
 package main
 
 import (
+	"fmt"
+
 	"go.platform-mesh.io/access-operator/cmd"
 )
 
 func main() {
+	fmt.Println("XXX")
 	cmd.Execute()
 }

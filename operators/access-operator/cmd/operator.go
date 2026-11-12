@@ -26,7 +26,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"go.platform-mesh.io/access-operator/pkg/config"
-	"go.platform-mesh.io/access-operator/pkg/controllers/accessgrant"
+	"go.platform-mesh.io/access-operator/pkg/controller/accessgrant"
 	pmaccessv1alpha1 "go.platform-mesh.io/apis/access/v1alpha1"
 	pmprovidersv1alpha1 "go.platform-mesh.io/apis/providers/v1alpha1"
 	pmconfig "go.platform-mesh.io/golang-commons/config"
@@ -44,7 +44,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
-	mcmultiprovider "sigs.k8s.io/multicluster-runtime/providers/multi"
 
 	mcapiexportprovider "github.com/kcp-dev/multicluster-provider/apiexport"
 	kcpapisv1alpha1 "github.com/kcp-dev/sdk/apis/apis/v1alpha1"
@@ -139,7 +138,30 @@ func runController(_ *cobra.Command, _ []string) { // coverage-ignore
 		}
 	}
 
-	mgr, err := mcmanager.New(restCfg, mcmultiprovider.New(mcmultiprovider.Options{}), mcmanager.Options{
+	kcpCfg, err := clientcmd.BuildConfigFromFlags("", operatorCfg.KCP.Kubeconfig)
+	if err != nil {
+		setupLog.Error(err, "failed to load kcp kubeconfig", "path", operatorCfg.KCP.Kubeconfig)
+		os.Exit(1)
+	}
+
+	setupLog.Info("starting apiexport-access.platform-mesh.io provider")
+	var provider *mcapiexportprovider.Provider
+	err = wait.PollUntilContextCancel(ctx, defaultWaitForApiexportProviderPeriod, true, func(ctx context.Context) (bool, error) {
+		var err error
+		provider, err = mcapiexportprovider.New(kcpCfg, operatorCfg.KCP.APIExportEndpointSliceName, mcapiexportprovider.Options{
+			Scheme: scheme,
+		})
+		if err != nil {
+			setupLog.Error(err, "failed to create apiexport provider", "endpointslice", operatorCfg.KCP.APIExportEndpointSliceName)
+		}
+		return err == nil, nil
+	})
+	if err != nil {
+		setupLog.Error(err, "failed to create apiexport provider")
+		os.Exit(1)
+	}
+
+	mgr, err := mcmanager.New(restCfg, provider, mcmanager.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress:   defaultCfg.Metrics.BindAddress,
@@ -167,31 +189,6 @@ func runController(_ *cobra.Command, _ []string) { // coverage-ignore
 		os.Exit(1)
 	}
 
-	multiProvider := mgr.GetProvider().(*mcmultiprovider.Provider)
-
-	kcpCfg, err := clientcmd.BuildConfigFromFlags("", operatorCfg.KCP.Kubeconfig)
-	if err != nil {
-		setupLog.Error(err, "failed to load kcp kubeconfig", "path", operatorCfg.KCP.Kubeconfig)
-		os.Exit(1)
-	}
-
-	setupLog.Info("starting apiexport-access.platform-mesh.io provider")
-	var provider *mcapiexportprovider.Provider
-	err = wait.PollUntilContextCancel(ctx, defaultWaitForApiexportProviderPeriod, true, func(ctx context.Context) (bool, error) {
-		var err error
-		provider, err = mcapiexportprovider.New(kcpCfg, operatorCfg.KCP.APIExportEndpointSliceName, mcapiexportprovider.Options{
-			Scheme: scheme,
-		})
-		if err != nil {
-			setupLog.Error(err, "failed to create apiexport provider", "endpointslice", operatorCfg.KCP.APIExportEndpointSliceName)
-		}
-		return err == nil, nil
-	})
-	if err != nil {
-		setupLog.Error(err, "failed to create apiexport provider")
-		os.Exit(1)
-	}
-
 	c, err := accessgrant.NewController(mgr, &operatorCfg)
 	if err != nil {
 		setupLog.Error(err, "failed to create AccessGrant controller")
@@ -202,14 +199,8 @@ func runController(_ *cobra.Command, _ []string) { // coverage-ignore
 		os.Exit(1)
 	}
 
-	if err := multiProvider.AddProvider("apiexport-access-platform-mesh", provider); err != nil {
-		setupLog.Error(err, "failed to register apiexport provider")
-		os.Exit(1)
-	}
-	setupLog.Info("apiexport-access-platform-mesh mc provider added")
-
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctx); err != nil {
+	if err := mgr.Start(ctx); err != nil && ctx.Err() == nil {
 		log.Fatal().Err(err).Msg("problem running manager")
 	}
 }

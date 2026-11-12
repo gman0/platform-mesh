@@ -15,9 +15,10 @@ limitations under the License.
 */
 
 // Binary platform-mesh-access runs the user-side Platform Mesh access
-// SDK: an AccessIdentity controller and an HTTPS /access endpoint with
-// ALPN pm-access/1. Delivered as a single binary installed on the
-// user-side (or portal) cluster.
+// SDK: an AccessIdentity controller and an HTTPS server exposing the
+// unauthenticated /versions probe plus a handler per supported
+// handshake version (currently /v1/access). Delivered as a single
+// binary installed on the user-side (or portal) cluster.
 package main
 
 import (
@@ -26,7 +27,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -46,9 +49,6 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
-// ALPN token per RFC 012. The /access listener refuses any TLS
-// handshake that doesn't offer this protocol.
-const accessALPN = "pm-access/1"
 
 // Bounds the replay cache. Call-credential JWTs live ~90s (60s TTL
 // plus skew tolerance); well-behaved deployments see one entry per
@@ -121,17 +121,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	handler := &accessserver.Handler{
+	v1Handler := &accessserver.Handler{
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		ReplayCache: pmaccessproto.NewReplayCache(replayCacheSize),
 	}
 
+	// Honor any path prefix embedded in --public-url. Lets admins
+	// front the SDK with an ingress that keeps a prefix on the way
+	// through (e.g. https://host/platform-mesh/{versions,v1/access})
+	// without configuring ingress rewrites. Empty prefix = flat mount.
+	pathPrefix, err := publicURLPathPrefix(publicURL)
+	if err != nil {
+		setupLog.Error(err, "invalid --public-url")
+		os.Exit(1)
+	}
+
+	// Mux routes: unauthenticated /versions probe + one /vN/access
+	// handler per supported handshake version. When adding v2, mount
+	// the v2 handler here and extend pmaccessproto.SupportedVersions.
+	mux := http.NewServeMux()
+	mux.Handle(pathPrefix+pmaccessproto.VersionsPath, accessserver.VersionsHandler())
+	mux.Handle(pathPrefix+pmaccessproto.AccessPath(pmaccessproto.V1), v1Handler)
+
 	if err := mgr.Add(&accessHTTPSRunnable{
 		listen:   accessListen,
 		certFile: tlsCertFile,
 		keyFile:  tlsKeyFile,
-		handler:  handler,
+		handler:  mux,
 		cache:    mgr.GetCache(),
 	}); err != nil {
 		setupLog.Error(err, "unable to add /access HTTPS runnable")
@@ -154,10 +171,10 @@ func main() {
 	}
 }
 
-// accessHTTPSRunnable is a manager.Runnable that serves the /access
-// endpoint over HTTPS with ALPN pm-access/1. It waits for the shared
-// cache to sync before accepting traffic so the handler's List/Get
-// calls hit a populated cache.
+// accessHTTPSRunnable is a manager.Runnable that serves the /versions
+// probe and the versioned /vN/access handlers over HTTPS. It waits
+// for the shared cache to sync before accepting traffic so handler
+// List/Get calls hit a populated cache.
 type accessHTTPSRunnable struct {
 	listen   string
 	certFile string
@@ -185,17 +202,6 @@ func (r *accessHTTPSRunnable) Start(ctx context.Context) error {
 		Handler: r.handler,
 		TLSConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12,
-			NextProtos: []string{accessALPN},
-			// Reject TLS handshakes that didn't negotiate the
-			// pm-access/1 ALPN token. Go's stdlib otherwise lets
-			// clients that don't advertise ALPN at all (bare curl,
-			// generic HTTPS probes) complete the handshake.
-			VerifyConnection: func(cs tls.ConnectionState) error {
-				if cs.NegotiatedProtocol != accessALPN {
-					return fmt.Errorf("access: client did not negotiate ALPN %q", accessALPN)
-				}
-				return nil
-			},
 		},
 		BaseContext:       func(_ net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 10 * time.Second,
@@ -226,3 +232,16 @@ func (r *accessHTTPSRunnable) NeedLeaderElection() bool { return false }
 
 var _ manager.Runnable = (*accessHTTPSRunnable)(nil)
 var _ manager.LeaderElectionRunnable = (*accessHTTPSRunnable)(nil)
+
+// publicURLPathPrefix extracts the path prefix under which the SDK's
+// endpoints should be mounted, derived from --public-url. The
+// trailing slash is trimmed so callers can concatenate "/versions"
+// and "/v1/access" directly. Root path returns "".
+func publicURLPathPrefix(publicURL string) (string, error) {
+	u, err := url.Parse(publicURL)
+	if err != nil {
+		return "", fmt.Errorf("parse --public-url %q: %w", publicURL, err)
+	}
+	p := strings.TrimRight(u.Path, "/")
+	return p, nil
+}

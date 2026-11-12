@@ -10,6 +10,10 @@ spec:
     {{- range .Values.tls.dnsNames }}
     - {{ . | quote }}
     {{- end }}
+  ipAddresses:
+    {{- range .Values.tls.ipAddresses }}
+    - {{ . | quote }}
+    {{- end }}
   issuerRef:
     name: {{ .Values.tls.issuerRef }}
     kind: ClusterIssuer

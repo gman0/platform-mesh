@@ -23,13 +23,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"go.platform-mesh.io/access-operator/pkg/config"
 	pmaccessv1alpha1 "go.platform-mesh.io/apis/access/v1alpha1"
 	"go.platform-mesh.io/golang-commons/logger"
 	pmaccessproto "go.platform-mesh.io/protocol/access"
+	pmaccessv1 "go.platform-mesh.io/protocol/access/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -38,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	mccontext "sigs.k8s.io/multicluster-runtime/pkg/context"
 	mcmanager "sigs.k8s.io/multicluster-runtime/pkg/manager"
 	mcreconcile "sigs.k8s.io/multicluster-runtime/pkg/reconcile"
 )
@@ -77,6 +81,13 @@ type Reconciler struct {
 	httpClient   *http.Client
 	mintSAToken  SATokenMinter
 	readCABundle func() ([]byte, error)
+
+	// versionCache memoizes the picked handshake version per base
+	// URL, keyed by Token.URL. Populated by negotiateVersion on the
+	// first handshake attempt to a given provider and invalidated
+	// whenever a dial to the picked version fails.
+	versionCacheMu sync.Mutex
+	versionCache   map[string]string
 }
 
 // NewReconciler builds a Reconciler with production defaults. The
@@ -93,6 +104,7 @@ func NewReconciler(mgr mcmanager.Manager, cfg *config.OperatorConfig) *Reconcile
 			}
 			return os.ReadFile(cfg.KCP.CABundlePath)
 		},
+		versionCache: map[string]string{},
 	}
 }
 
@@ -118,6 +130,7 @@ func (r *Reconciler) WithCABundleReader(read func() ([]byte, error)) *Reconciler
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ctrl.Result, error) {
+	ctx = mccontext.WithCluster(ctx, req.ClusterName)
 	log := logger.LoadLoggerFromContext(ctx).ChildLogger("controller", "AccessGrant")
 
 	cluster, err := r.mgr.ClusterFromContext(ctx)
@@ -224,7 +237,33 @@ func (r *Reconciler) reconcile(ctx context.Context, log *logger.Logger, cl ctrlr
 		return ctrl.Result{}, fmt.Errorf("read kcp CA bundle: %w", err)
 	}
 
-	body := handshakeBody{
+	client, err := httpClientFor(r.httpClient, grant.Spec.CABundle)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("build HTTP client for /access: %w", err)
+	}
+
+	version, cached := r.cachedVersion(parsed.URL)
+	if !cached {
+		picked, serverVersions, nerr := negotiateVersion(ctx, client, parsed.URL)
+		if nerr != nil {
+			log.Info().Err(nerr).Str("url", parsed.URL).Msg("/versions probe failed")
+			setConnected(grant, metav1.ConditionFalse,
+				pmaccessv1alpha1.AccessGrantReasonAccessURLUnreachable,
+				fmt.Sprintf("probe %s/versions: %v", parsed.URL, nerr))
+			return ctrl.Result{RequeueAfter: retryUnreachable}, nil
+		}
+		if picked == "" {
+			setConnected(grant, metav1.ConditionFalse,
+				pmaccessv1alpha1.AccessGrantReasonUnsupportedProtocolVersion,
+				fmt.Sprintf("no mutually supported handshake version: provider offers %v, operator supports %v",
+					serverVersions, pmaccessproto.SupportedVersions))
+			return ctrl.Result{RequeueAfter: retryRejected}, nil
+		}
+		r.setCachedVersion(parsed.URL, picked)
+		version = picked
+	}
+
+	body := pmaccessv1.HandshakeRequest{
 		KcpURL:      r.cfg.KCP.ExternalUrl,
 		KcpCABundle: string(caBundle),
 		SAToken:     saToken,
@@ -239,24 +278,27 @@ func (r *Reconciler) reconcile(ctx context.Context, log *logger.Logger, cl ctrlr
 		return ctrl.Result{}, fmt.Errorf("sign JWT call credential: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, parsed.URL, bytes.NewReader(bodyBytes))
+	accessURL, err := url.JoinPath(parsed.URL, pmaccessproto.AccessPath(version))
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("build /access URL: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, accessURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build /access request: %w", err)
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+jwt)
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	client, err := httpClientFor(r.httpClient, grant.Spec.CABundle)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("build HTTP client for /access: %w", err)
-	}
-
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		log.Info().Err(err).Str("url", parsed.URL).Msg("/access dial failed")
+		log.Info().Err(err).Str("url", accessURL).Msg("/access dial failed")
+		// Dial failure may mean the server dropped our cached version
+		// (e.g. SDK upgraded past it). Invalidate so the next retry
+		// re-probes /versions.
+		r.invalidateCachedVersion(parsed.URL)
 		setConnected(grant, metav1.ConditionFalse,
 			pmaccessv1alpha1.AccessGrantReasonAccessURLUnreachable,
-			fmt.Sprintf("dial %s: %v", parsed.URL, err))
+			fmt.Sprintf("dial %s: %v", accessURL, err))
 		return ctrl.Result{RequeueAfter: retryUnreachable}, nil
 	}
 	defer resp.Body.Close()
@@ -267,7 +309,7 @@ func (r *Reconciler) reconcile(ctx context.Context, log *logger.Logger, cl ctrlr
 		setConnected(grant, metav1.ConditionTrue,
 			pmaccessv1alpha1.AccessGrantReasonHandshakeSucceeded,
 			"/access handshake completed")
-		log.Info().Str("url", parsed.URL).Msg("/access handshake succeeded")
+		log.Info().Str("url", accessURL).Msg("/access handshake succeeded")
 		return ctrl.Result{}, nil
 	case http.StatusAccepted:
 		setConnected(grant, metav1.ConditionFalse,
@@ -314,4 +356,23 @@ func setCondition(grant *pmaccessv1alpha1.AccessGrant, condType string, status m
 		Message:            msg,
 		ObservedGeneration: grant.Generation,
 	})
+}
+
+func (r *Reconciler) cachedVersion(baseURL string) (string, bool) {
+	r.versionCacheMu.Lock()
+	defer r.versionCacheMu.Unlock()
+	v, ok := r.versionCache[baseURL]
+	return v, ok
+}
+
+func (r *Reconciler) setCachedVersion(baseURL, version string) {
+	r.versionCacheMu.Lock()
+	defer r.versionCacheMu.Unlock()
+	r.versionCache[baseURL] = version
+}
+
+func (r *Reconciler) invalidateCachedVersion(baseURL string) {
+	r.versionCacheMu.Lock()
+	defer r.versionCacheMu.Unlock()
+	delete(r.versionCache, baseURL)
 }

@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	pmaccessproto "go.platform-mesh.io/protocol/access"
+	pmaccessv1 "go.platform-mesh.io/protocol/access/v1"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
 	accessctrl "go.platform-mesh.io/sdk/access/internal/controller"
 
@@ -118,7 +119,7 @@ func TestHandler_200_CreatesAccessAndKubeconfig(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	payload := handshakeBody{
+	payload := pmaccessv1.HandshakeRequest{
 		KcpURL:      "https://kcp.pm.example",
 		KcpCABundle: "ca-pem",
 		SAToken:     "sa-token-value",
@@ -212,7 +213,7 @@ func TestHandler_Replay_403(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	payload := handshakeBody{KcpURL: "https://kcp", KcpCABundle: "ca", SAToken: "t"}
+	payload := pmaccessv1.HandshakeRequest{KcpURL: "https://kcp", KcpCABundle: "ca", SAToken: "t"}
 	body, _ := json.Marshal(payload)
 	jwt, _ := pmaccessproto.SignCallCredential(ti.hmacSecret, ti.tokenID, body, 0)
 
@@ -235,7 +236,7 @@ func TestHandler_ManualMode_DeferredTo403(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	payload := handshakeBody{KcpURL: "https://kcp", SAToken: "t"}
+	payload := pmaccessv1.HandshakeRequest{KcpURL: "https://kcp", SAToken: "t"}
 	body, _ := json.Marshal(payload)
 	jwt, _ := pmaccessproto.SignCallCredential(ti.hmacSecret, ti.tokenID, body, 0)
 

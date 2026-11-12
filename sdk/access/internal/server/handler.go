@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package server implements the user-side /access HTTP handler.
+// Package server implements the user-side /access HTTP handlers.
 package server
 
 import (
@@ -27,6 +27,7 @@ import (
 	"net/http"
 
 	pmaccessproto "go.platform-mesh.io/protocol/access"
+	pmaccessv1 "go.platform-mesh.io/protocol/access/v1"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
 	accessctrl "go.platform-mesh.io/sdk/access/internal/controller"
 
@@ -45,32 +46,19 @@ import (
 // is written into the owned Secret.
 const KubeconfigSecretKey = "kubeconfig"
 
-// Handler serves POST /access against the user-side cluster. On a
+// Handler serves POST /v1/access against the user-side cluster. On a
 // verified handshake it writes the delivered kubeconfig as a Secret
 // owned by a freshly-created Access CR, and responds 200 empty.
 //
-// TLS, ALPN, and listener wiring live in the SDK binary (Chunk 4C);
-// this type is a plain http.Handler and takes no responsibility for
-// transport.
+// TLS and listener wiring live in the SDK binary; this type is a
+// plain http.Handler mounted by the top-level mux at /v1/access.
 type Handler struct {
 	Client      ctrlruntimeclient.Client
 	Scheme      *runtime.Scheme
 	ReplayCache *pmaccessproto.ReplayCache
 }
 
-// handshakeBody mirrors the JSON the access-operator sends. Must stay
-// in sync with the access-operator subroutine's body shape.
-type handshakeBody struct {
-	KcpURL      string `json:"kcpURL"`
-	KcpCABundle string `json:"kcpCABundle"`
-	SAToken     string `json:"saToken"`
-}
-
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/access" {
-		http.NotFound(w, r)
-		return
-	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -132,7 +120,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse delivery body.
-	var payload handshakeBody
+	var payload pmaccessv1.HandshakeRequest
 	if err := json.Unmarshal(body, &payload); err != nil {
 		http.Error(w, fmt.Sprintf("parse body: %v", err), http.StatusForbidden)
 		return
@@ -187,7 +175,7 @@ func (h *Handler) loadHMACSecret(ctx context.Context, identity *accessv1alpha1.A
 // that Access, and marks the Access Phase=Active. Idempotency is best
 // effort via IsAlreadyExists tolerance; the replay cache is the
 // primary guard against duplicate admission for the same jti.
-func (h *Handler) admit(ctx context.Context, identity *accessv1alpha1.AccessIdentity, payload *handshakeBody) error {
+func (h *Handler) admit(ctx context.Context, identity *accessv1alpha1.AccessIdentity, payload *pmaccessv1.HandshakeRequest) error {
 	suffix, err := randSuffix()
 	if err != nil {
 		return fmt.Errorf("generate access suffix: %w", err)
@@ -234,7 +222,7 @@ func (h *Handler) admit(ctx context.Context, identity *accessv1alpha1.AccessIden
 	return nil
 }
 
-func buildKubeconfig(payload *handshakeBody) ([]byte, error) {
+func buildKubeconfig(payload *pmaccessv1.HandshakeRequest) ([]byte, error) {
 	cfg := clientcmdapi.NewConfig()
 	cfg.Clusters = map[string]*clientcmdapi.Cluster{
 		"pm-kcp": {

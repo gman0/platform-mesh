@@ -81,6 +81,13 @@ const (
 	// controller has not yet populated the SA-token Secret
 	// access-operator created in the Provider Workspace.
 	AccessGrantReasonSATokenPending = "SATokenPending"
+
+	// AccessGrantReasonUnsupportedProtocolVersion is set when the
+	// /versions probe returned a list of handshake versions that
+	// share no overlap with the versions this operator supports.
+	// The condition message carries both lists so the user can
+	// decide whether to upgrade the operator or the provider SDK.
+	AccessGrantReasonUnsupportedProtocolVersion = "UnsupportedProtocolVersion"
 )
 
 // AccessTokenSecretRef references a Secret in the same namespace as the

@@ -28,6 +28,7 @@ import (
 	pmaccessv1alpha1 "go.platform-mesh.io/apis/access/v1alpha1"
 	"go.platform-mesh.io/golang-commons/logger"
 	pmaccessproto "go.platform-mesh.io/protocol/access"
+	pmaccessv1 "go.platform-mesh.io/protocol/access/v1"
 
 	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -104,6 +105,10 @@ func newReconcilerAndClient(t *testing.T, srv *httptest.Server, fx testFixture) 
 			return "stub-sa-token", nil
 		}).
 		WithCABundleReader(func() ([]byte, error) { return []byte("stub-ca-bundle"), nil })
+	// Skip the /versions probe in tests that use a single-handler
+	// httptest.Server. Version-negotiation behavior is covered by
+	// dedicated tests that stand up a mux.
+	r.setCachedVersion(srv.URL, pmaccessproto.V1)
 	return r, cl
 }
 
@@ -117,7 +122,7 @@ func testLog(t *testing.T) *logger.Logger {
 }
 
 func TestHandshake_200_MarksConnected(t *testing.T) {
-	var gotBody handshakeBody
+	var gotBody pmaccessv1.HandshakeRequest
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")

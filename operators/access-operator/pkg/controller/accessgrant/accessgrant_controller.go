@@ -25,7 +25,6 @@ import (
 	"go.platform-mesh.io/access-operator/pkg/config"
 	pmaccessv1alpha1 "go.platform-mesh.io/apis/access/v1alpha1"
 	pmconfig "go.platform-mesh.io/golang-commons/config"
-	"go.platform-mesh.io/golang-commons/controller/filter"
 	"go.platform-mesh.io/golang-commons/controller/lifecycle/ratelimiter"
 
 	"k8s.io/client-go/util/workqueue"
@@ -73,11 +72,9 @@ func (c *Controller) SetupWithManager(mgr mcmanager.Manager, commonCfg *pmconfig
 		MaxConcurrentReconciles: commonCfg.MaxConcurrentReconciles,
 		RateLimiter:             c.rateLimiter,
 	}
-	predicates := append([]predicate.Predicate{filter.DebugResourcesBehaviourPredicate(commonCfg.DebugLabelValue)}, eventPredicates...)
 	return mcbuilder.ControllerManagedBy(mgr).
 		Named(ControllerName).
-		For(&pmaccessv1alpha1.AccessGrant{}, mcbuilder.WithEngageWithProviderClusters(true)).
+		For(&pmaccessv1alpha1.AccessGrant{}).
 		WithOptions(opts).
-		WithEventFilter(predicate.And(predicates...)).
 		Complete(c.reconciler)
 }

@@ -20,22 +20,20 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
-)
 
-// handshakeBody is the JSON payload posted to /access.
-type handshakeBody struct {
-	KcpURL      string `json:"kcpURL"`
-	KcpCABundle string `json:"kcpCABundle"`
-	SAToken     string `json:"saToken"`
-}
+	pmaccessproto "go.platform-mesh.io/protocol/access"
+)
 
 // SATokenMinter returns a bearer token for the named ServiceAccount.
 // A non-nil nil-error empty string means the token is not yet
@@ -105,11 +103,58 @@ func httpClientFor(base *http.Client, caBundlePEM string) (*http.Client, error) 
 	} else {
 		baseTransport = &http.Transport{}
 	}
-	baseTransport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	baseTransport.TLSClientConfig = &tls.Config{
+		RootCAs:    pool,
+		MinVersion: tls.VersionTLS12,
+	}
 	return &http.Client{
 		Timeout:   base.Timeout,
 		Transport: baseTransport,
 	}, nil
+}
+
+// negotiateVersion probes <baseURL>/versions, picks the highest
+// version this operator supports that the server also lists, and
+// returns both the picked version and the server's full advertised
+// list (the latter lets callers surface it in status when there is
+// no overlap).
+//
+// The server's /versions endpoint is intentionally unauthenticated
+// and returns a stable JSON shape; see protocol/access.
+func negotiateVersion(ctx context.Context, cl *http.Client, baseURL string) (picked string, serverVersions []string, err error) {
+	probeURL, err := url.JoinPath(baseURL, pmaccessproto.VersionsPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("build /versions URL: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, probeURL, nil)
+	if err != nil {
+		return "", nil, fmt.Errorf("build /versions request: %w", err)
+	}
+	resp, err := cl.Do(req)
+	if err != nil {
+		return "", nil, fmt.Errorf("GET %s: %w", probeURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", nil, fmt.Errorf("GET %s: HTTP %d: %s", probeURL, resp.StatusCode, trim(string(body)))
+	}
+	var payload pmaccessproto.VersionsResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&payload); err != nil {
+		return "", nil, fmt.Errorf("decode /versions response: %w", err)
+	}
+	// Operator preference order is pmaccessproto.SupportedVersions
+	// (newest first). Pick the first one the server also offers.
+	serverSet := make(map[string]struct{}, len(payload.Versions))
+	for _, v := range payload.Versions {
+		serverSet[v] = struct{}{}
+	}
+	for _, v := range pmaccessproto.SupportedVersions {
+		if _, ok := serverSet[v]; ok {
+			return v, payload.Versions, nil
+		}
+	}
+	return "", payload.Versions, nil
 }
 
 // trim truncates s for inclusion in a condition message.
