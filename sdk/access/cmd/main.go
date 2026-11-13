@@ -70,10 +70,10 @@ func main() {
 		leaderElect  bool
 	)
 
-	pflag.StringVar(&publicURL, "public-url", "", "External HTTPS URL for /access, encoded into minted access tokens. Required.")
-	pflag.StringVar(&tlsCertFile, "tls-cert-file", "", "Path to PEM-encoded TLS cert for /access. Required.")
-	pflag.StringVar(&tlsKeyFile, "tls-key-file", "", "Path to PEM-encoded TLS key for /access. Required.")
-	pflag.StringVar(&accessListen, "access-listen", ":8443", "Listen address for the /access HTTPS server.")
+	pflag.StringVar(&publicURL, "public-url", "", "External URL for /access, encoded into minted access tokens. Required.")
+	pflag.StringVar(&tlsCertFile, "tls-cert-file", "", "Path to PEM-encoded TLS cert for /access. Leave empty to serve plain HTTP (expects TLS termination upstream).")
+	pflag.StringVar(&tlsKeyFile, "tls-key-file", "", "Path to PEM-encoded TLS key for /access. Must be set together with --tls-cert-file.")
+	pflag.StringVar(&accessListen, "access-listen", ":8443", "Listen address for the /access server.")
 	pflag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Metrics listen address.")
 	pflag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe listen address.")
 	pflag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election.")
@@ -82,16 +82,18 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 	setupLog := ctrl.Log.WithName("setup")
 
-	for flag, val := range map[string]string{
-		"--public-url":    publicURL,
-		"--tls-cert-file": tlsCertFile,
-		"--tls-key-file":  tlsKeyFile,
-	} {
-		if val == "" {
-			setupLog.Error(fmt.Errorf("flag required"), flag+" is required")
-			os.Exit(1)
-		}
+	if publicURL == "" {
+		setupLog.Error(fmt.Errorf("flag required"), "--public-url is required")
+		os.Exit(1)
 	}
+	// --tls-cert-file and --tls-key-file are optional, but both-or-neither.
+	// When unset, the server runs plain HTTP and TLS termination is
+	// expected to happen upstream (e.g. at an ingress / gateway).
+	if (tlsCertFile == "") != (tlsKeyFile == "") {
+		setupLog.Error(fmt.Errorf("flag combination invalid"), "--tls-cert-file and --tls-key-file must be set together, or both left empty")
+		os.Exit(1)
+	}
+	tlsEnabled := tlsCertFile != ""
 
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -144,14 +146,15 @@ func main() {
 	mux.Handle(pathPrefix+pmaccessproto.VersionsPath, accessserver.VersionsHandler())
 	mux.Handle(pathPrefix+pmaccessproto.AccessPath(pmaccessproto.V1), v1Handler)
 
-	if err := mgr.Add(&accessHTTPSRunnable{
-		listen:   accessListen,
-		certFile: tlsCertFile,
-		keyFile:  tlsKeyFile,
-		handler:  mux,
-		cache:    mgr.GetCache(),
+	if err := mgr.Add(&accessHTTPRunnable{
+		listen:     accessListen,
+		tlsEnabled: tlsEnabled,
+		certFile:   tlsCertFile,
+		keyFile:    tlsKeyFile,
+		handler:    mux,
+		cache:      mgr.GetCache(),
 	}); err != nil {
-		setupLog.Error(err, "unable to add /access HTTPS runnable")
+		setupLog.Error(err, "unable to add /access server runnable")
 		os.Exit(1)
 	}
 
@@ -171,16 +174,18 @@ func main() {
 	}
 }
 
-// accessHTTPSRunnable is a manager.Runnable that serves the /versions
-// probe and the versioned /vN/access handlers over HTTPS. It waits
-// for the shared cache to sync before accepting traffic so handler
-// List/Get calls hit a populated cache.
-type accessHTTPSRunnable struct {
-	listen   string
-	certFile string
-	keyFile  string
-	handler  http.Handler
-	cache    cacheSyncer
+// accessHTTPRunnable is a manager.Runnable that serves the /versions
+// probe and the versioned /vN/access handlers. It waits for the shared
+// cache to sync before accepting traffic so handler List/Get calls hit
+// a populated cache. When tlsEnabled is false the server runs plain
+// HTTP (for setups where TLS terminates at an upstream gateway).
+type accessHTTPRunnable struct {
+	listen     string
+	tlsEnabled bool
+	certFile   string
+	keyFile    string
+	handler    http.Handler
+	cache      cacheSyncer
 }
 
 // cacheSyncer narrows cache.Cache to the one method we need, so tests
@@ -190,7 +195,7 @@ type cacheSyncer interface {
 }
 
 // Start implements manager.Runnable.
-func (r *accessHTTPSRunnable) Start(ctx context.Context) error {
+func (r *accessHTTPRunnable) Start(ctx context.Context) error {
 	syncCtx, cancel := context.WithTimeout(ctx, cacheSyncTimeout)
 	defer cancel()
 	if !r.cache.WaitForCacheSync(syncCtx) {
@@ -198,17 +203,21 @@ func (r *accessHTTPSRunnable) Start(ctx context.Context) error {
 	}
 
 	srv := &http.Server{
-		Addr:    r.listen,
-		Handler: r.handler,
-		TLSConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
+		Addr:              r.listen,
+		Handler:           r.handler,
 		BaseContext:       func(_ net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	if r.tlsEnabled {
+		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- srv.ListenAndServeTLS(r.certFile, r.keyFile)
+		if r.tlsEnabled {
+			errCh <- srv.ListenAndServeTLS(r.certFile, r.keyFile)
+		} else {
+			errCh <- srv.ListenAndServe()
+		}
 	}()
 	select {
 	case <-ctx.Done():
@@ -228,10 +237,10 @@ func (r *accessHTTPSRunnable) Start(ctx context.Context) error {
 // on every replica. Correctness isn't affected (replay cache is
 // per-replica, but the AccessIdentity cluster-state guards against
 // genuine replays via jti uniqueness).
-func (r *accessHTTPSRunnable) NeedLeaderElection() bool { return false }
+func (r *accessHTTPRunnable) NeedLeaderElection() bool { return false }
 
-var _ manager.Runnable = (*accessHTTPSRunnable)(nil)
-var _ manager.LeaderElectionRunnable = (*accessHTTPSRunnable)(nil)
+var _ manager.Runnable = (*accessHTTPRunnable)(nil)
+var _ manager.LeaderElectionRunnable = (*accessHTTPRunnable)(nil)
 
 // publicURLPathPrefix extracts the path prefix under which the SDK's
 // endpoints should be mounted, derived from --public-url. The

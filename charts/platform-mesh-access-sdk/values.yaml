@@ -9,15 +9,22 @@ image:
   # -- Image digest (when set, overrides tag: registry/repository@digest).
   digest: ""
 
-# -- External HTTPS URL for /access. Encoded into minted access tokens.
-# Required; the SDK refuses to run without it.
+# -- External URL for /access. Encoded into minted access tokens.
+# Required; the SDK refuses to run without it. HTTPS unless TLS
+# terminates upstream and tls.enabled is false — in which case this
+# may be a plain http:// URL.
 publicUrl: ""
 
-# -- Port the /access HTTPS listener binds to inside the Pod. Exposed
+# -- Port the /access listener binds to inside the Pod. Exposed
 # externally via the Service below.
 accessPort: 8443
 
 tls:
+  # -- Serve /access over TLS at the Pod. Set to false when TLS
+  # termination happens upstream (ingress / gateway) and the Pod
+  # should listen on plain HTTP. When false, no Certificate is issued
+  # and no cert volume is mounted.
+  enabled: true
   # -- Name of the cert-manager Certificate / resulting Secret holding
   # the TLS cert+key for /access. Created by the chart below.
   secretName: platform-mesh-access-tls
@@ -41,6 +48,49 @@ service:
   # -- Static NodePort to pin when service.type is NodePort. Leave unset
   # to let Kubernetes assign one from the service-node-port-range.
   nodePort: ""
+
+# -- Optional Gateway API HTTPRoute exposing /access through a cluster
+# Gateway. The HTTPRoute and the Service must live in the same namespace.
+# Users supply the Gateway themselves (shared or dedicated).
+httpRoute:
+  enabled: false
+  # -- Hostnames the route matches. Leave empty to match any host on
+  # the selected Gateway listener.
+  hostnames: []
+  # -- Gateways the route attaches to.
+  parentRefs: []
+  # - group: gateway.networking.k8s.io
+  #   kind: Gateway
+  #   name: shared
+  #   namespace: platform-mesh-system
+  # -- Path prefix matched by the route. "/" catches all paths; set to
+  # e.g. "/pm" to share a Gateway with other services. The SDK honors
+  # any path prefix in --public-url, so no URL rewrite is needed.
+  pathPrefix: /
+  # -- Optional filters (e.g. URLRewrite, RequestHeaderModifier).
+  filters: []
+  # -- Optional ReferenceGrant permitting HTTPRoutes from another
+  # namespace to backendRef this chart's Service. Only needed when the
+  # HTTPRoute is created in a different namespace than this release.
+  referenceGrant:
+    enabled: false
+    fromNamespace: ""
+
+# -- Optional classic Ingress exposing /access, for clusters without
+# Gateway API. The Ingress and the Service must live in the same namespace.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  # - host: access.example.com
+  #   paths:
+  #     - path: /
+  #       pathType: Prefix
+  tls: []
+  # - hosts:
+  #     - access.example.com
+  #   secretName: access-tls
 
 security:
   mountServiceAccountToken: true

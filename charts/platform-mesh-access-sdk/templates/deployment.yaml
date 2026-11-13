@@ -53,15 +53,21 @@ spec:
               port: health
           args:
             - --public-url={{ required "publicUrl is required" .Values.publicUrl }}
+            {{- if .Values.tls.enabled }}
             - --tls-cert-file=/tls/tls.crt
             - --tls-key-file=/tls/tls.key
+            {{- end }}
             - --access-listen=:{{ .Values.accessPort }}
             - --leader-elect={{ .Values.operator.leaderElect }}
+          {{- if .Values.tls.enabled }}
           volumeMounts:
             - name: tls
               mountPath: /tls
               readOnly: true
+          {{- end }}
+      {{- if .Values.tls.enabled }}
       volumes:
         - name: tls
           secret:
             secretName: {{ .Values.tls.secretName }}
+      {{- end }}
