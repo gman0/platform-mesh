@@ -20,7 +20,7 @@ spec:
         {{- with .Values.deployment.specTemplate.labels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-        control-plane: access-sdk
+        control-plane: access-sdk-controller
       annotations:
         {{- with .Values.deployment.specTemplate.annotations }}
         {{- toYaml . | nindent 8 }}
@@ -30,13 +30,11 @@ spec:
       {{- include "common.imagePullSecret" . | indent 6 }}
       automountServiceAccountToken: {{ .Values.security.mountServiceAccountToken }}
       containers:
-        - name: manager
+        - name: controller
           image: {{ $imageRef }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/sdk/platform-mesh-access-controller"]
           ports:
-            - name: access
-              containerPort: {{ .Values.accessPort }}
-              protocol: TCP
             - name: metrics
               containerPort: 8080
               protocol: TCP
@@ -52,22 +50,4 @@ spec:
               path: /readyz
               port: health
           args:
-            - --public-url={{ required "publicUrl is required" .Values.publicUrl }}
-            {{- if .Values.tls.enabled }}
-            - --tls-cert-file=/tls/tls.crt
-            - --tls-key-file=/tls/tls.key
-            {{- end }}
-            - --access-listen=:{{ .Values.accessPort }}
             - --leader-elect={{ .Values.operator.leaderElect }}
-          {{- if .Values.tls.enabled }}
-          volumeMounts:
-            - name: tls
-              mountPath: /tls
-              readOnly: true
-          {{- end }}
-      {{- if .Values.tls.enabled }}
-      volumes:
-        - name: tls
-          secret:
-            secretName: {{ .Values.tls.secretName }}
-      {{- end }}

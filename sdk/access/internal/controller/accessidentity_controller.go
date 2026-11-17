@@ -178,8 +178,11 @@ func (r *AccessIdentityReconciler) setReady(identity *accessv1alpha1.AccessIdent
 	})
 }
 
-// SetupWithManager registers the field indexer and the reconciler.
-func (r *AccessIdentityReconciler) SetupWithManager(mgr ctrl.Manager) error {
+// RegisterTokenIDIndex registers the TokenIDIndex field indexer on
+// AccessIdentity.status.tokenID. Both the controller binary and the
+// server binary call this during setup so the /access handler can
+// resolve an incoming call credential's sub claim to an AccessIdentity.
+func RegisterTokenIDIndex(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(
 		context.Background(),
 		&accessv1alpha1.AccessIdentity{},
@@ -194,7 +197,14 @@ func (r *AccessIdentityReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	); err != nil {
 		return fmt.Errorf("register %s indexer: %w", TokenIDIndex, err)
 	}
+	return nil
+}
 
+// SetupWithManager registers the field indexer and the reconciler.
+func (r *AccessIdentityReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if err := RegisterTokenIDIndex(mgr); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("AccessIdentityReconciler").
 		For(&accessv1alpha1.AccessIdentity{}).

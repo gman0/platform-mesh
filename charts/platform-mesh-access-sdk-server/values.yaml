@@ -9,11 +9,11 @@ image:
   # -- Image digest (when set, overrides tag: registry/repository@digest).
   digest: ""
 
-# -- External URL for /access. Encoded into minted access tokens.
-# Required; the SDK refuses to run without it. HTTPS unless TLS
-# terminates upstream and tls.enabled is false — in which case this
-# may be a plain http:// URL.
-publicUrl: ""
+# -- Optional URL path prefix under which /versions and /vN/access are
+# mounted. Leave empty for root. Use when fronting the server with an
+# ingress that preserves a prefix on the request path (e.g.
+# "/platform-mesh" to serve at https://host/platform-mesh/{versions,v1/access}).
+pathPrefix: ""
 
 # -- Port the /access listener binds to inside the Pod. Exposed
 # externally via the Service below.
@@ -64,8 +64,8 @@ httpRoute:
   #   name: shared
   #   namespace: platform-mesh-system
   # -- Path prefix matched by the route. "/" catches all paths; set to
-  # e.g. "/pm" to share a Gateway with other services. The SDK honors
-  # any path prefix in --public-url, so no URL rewrite is needed.
+  # e.g. "/pm" to share a Gateway with other services. The server honors
+  # any path prefix in --path-prefix, so no URL rewrite is needed.
   pathPrefix: /
   # -- Optional filters (e.g. URLRewrite, RequestHeaderModifier).
   filters: []
@@ -100,6 +100,3 @@ deployment:
     annotations: {}
     labels: {}
   replicas: 1
-
-operator:
-  leaderElect: true

@@ -14,11 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Binary platform-mesh-access runs the user-side Platform Mesh access
-// SDK: an AccessIdentity controller and an HTTPS server exposing the
-// unauthenticated /versions probe plus a handler per supported
-// handshake version (currently /v1/access). Delivered as a single
-// binary installed on the user-side (or portal) cluster.
+// Binary platform-mesh-access-server exposes the user-side /access
+// HTTP endpoints: the unauthenticated /versions probe and one
+// /vN/access handler per supported handshake version (currently
+// /v1/access). The AccessIdentity reconciler lives in a separate
+// workload (platform-mesh-access-controller).
 package main
 
 import (
@@ -48,7 +48,6 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
-
 // Bounds the replay cache. Call-credential JWTs live ~90s (60s TTL
 // plus skew tolerance); well-behaved deployments see one entry per
 // handshake per Identity. 1000 is generous for mid-size operations.
@@ -66,7 +65,6 @@ func main() {
 		accessListen string
 		metricsAddr  string
 		probeAddr    string
-		leaderElect  bool
 	)
 
 	pflag.StringVar(&pathPrefix, "path-prefix", "", "URL path prefix to mount /versions and /vN/access under. Leave empty for root. Use when fronting the SDK with an ingress that preserves a prefix (e.g. \"/platform-mesh\").")
@@ -75,7 +73,6 @@ func main() {
 	pflag.StringVar(&accessListen, "access-listen", ":8443", "Listen address for the /access server.")
 	pflag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Metrics listen address.")
 	pflag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe listen address.")
-	pflag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election.")
 	pflag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
@@ -94,26 +91,25 @@ func main() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(accessv1alpha1.AddToScheme(scheme))
 
+	// The server runs a manager with no controllers — just the shared
+	// cache + field indexer + health/metrics. Leader election is off:
+	// every replica serves /access (the replay cache is per-replica but
+	// AccessIdentity state guards against genuine replays via jti).
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
 			BindAddress: metricsAddr,
 		},
-		HealthProbeBindAddress:        probeAddr,
-		LeaderElection:                leaderElect,
-		LeaderElectionID:              "platform-mesh-access.access-sdk.platform-mesh.io",
-		LeaderElectionReleaseOnCancel: true,
+		HealthProbeBindAddress: probeAddr,
+		LeaderElection:         false,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to build manager")
 		os.Exit(1)
 	}
 
-	if err := (&accessctrl.AccessIdentityReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to register AccessIdentityReconciler")
+	if err := accessctrl.RegisterTokenIDIndex(mgr); err != nil {
+		setupLog.Error(err, "unable to register TokenID field indexer")
 		os.Exit(1)
 	}
 
@@ -155,7 +151,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting access SDK", "listen", accessListen, "pathPrefix", pathPrefix)
+	setupLog.Info("starting access server", "listen", accessListen, "pathPrefix", pathPrefix)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "manager stopped with error")
 		os.Exit(1)
@@ -221,11 +217,4 @@ func (r *accessHTTPRunnable) Start(ctx context.Context) error {
 	}
 }
 
-// NeedLeaderElection returns false so the /access endpoint is served
-// on every replica. Correctness isn't affected (replay cache is
-// per-replica, but the AccessIdentity cluster-state guards against
-// genuine replays via jti uniqueness).
-func (r *accessHTTPRunnable) NeedLeaderElection() bool { return false }
-
 var _ manager.Runnable = (*accessHTTPRunnable)(nil)
-var _ manager.LeaderElectionRunnable = (*accessHTTPRunnable)(nil)

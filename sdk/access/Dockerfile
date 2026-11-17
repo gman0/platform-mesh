@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Build the platform-mesh-access binary.
+# Build the platform-mesh-access-server and platform-mesh-access-controller
+# binaries. Both ship in a single image; charts pick one via the container
+# command.
 #
 # NOTE: the build context is the repository ROOT, not this directory.
 # The sdk module is linked to shared in-repo modules through the
@@ -47,7 +49,9 @@ WORKDIR /workspace/sdk
 RUN go mod download
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
-    go build -ldflags '-w -s' -o /workspace/platform-mesh-access ./access/cmd
+    go build -ldflags '-w -s' -o /workspace/platform-mesh-access-server ./access/cmd/access-server && \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -ldflags '-w -s' -o /workspace/platform-mesh-access-controller ./access/cmd/access-controller
 
 FROM scratch
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
@@ -55,7 +59,8 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 ENV USER_UID=1001
 ENV GROUP_UID=1001
-COPY --from=builder --chown=${USER_UID}:${GROUP_UID} /workspace/platform-mesh-access /sdk/platform-mesh-access
+COPY --from=builder --chown=${USER_UID}:${GROUP_UID} /workspace/platform-mesh-access-server /sdk/platform-mesh-access-server
+COPY --from=builder --chown=${USER_UID}:${GROUP_UID} /workspace/platform-mesh-access-controller /sdk/platform-mesh-access-controller
 
 USER ${USER_UID}:${GROUP_UID}
-ENTRYPOINT ["/sdk/platform-mesh-access"]
+# No default ENTRYPOINT — the chart (server vs. controller) sets command.

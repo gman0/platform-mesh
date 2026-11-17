@@ -1,0 +1,24 @@
+crds:
+  enabled: true
+
+image:
+  # -- Image registry.
+  registry: ghcr.io
+  # -- Image repository (without registry).
+  repository: platform-mesh/platform-mesh/platform-mesh-access
+  # -- Image digest (when set, overrides tag: registry/repository@digest).
+  digest: ""
+
+security:
+  mountServiceAccountToken: true
+
+deployment:
+  specTemplate:
+    annotations: {}
+    labels: {}
+  replicas: 1
+
+operator:
+  # -- Enable leader election so only one replica mints tokens at a
+  # time. Keep on in production; safe to leave on with replicas=1.
+  leaderElect: true
