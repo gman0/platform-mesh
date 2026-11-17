@@ -134,7 +134,7 @@ func TestHandshake_200_MarksConnected(t *testing.T) {
 	fx := newFixture(t, srv.URL)
 	r, cl := newReconcilerAndClient(t, srv, fx)
 
-	if _, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant); err != nil {
+	if _, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant, "test-cluster"); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 
@@ -149,8 +149,8 @@ func TestHandshake_200_MarksConnected(t *testing.T) {
 	if gotAuth == "" || len(gotAuth) < len("Bearer ") || gotAuth[:7] != "Bearer " {
 		t.Errorf("Authorization header = %q, want Bearer <jwt>", gotAuth)
 	}
-	if gotBody.KcpURL != "https://kcp.pm.example" {
-		t.Errorf("kcpURL = %q, want https://kcp.pm.example", gotBody.KcpURL)
+	if gotBody.KcpURL != "https://kcp.pm.example/clusters/test-cluster" {
+		t.Errorf("kcpURL = %q, want https://kcp.pm.example/clusters/test-cluster", gotBody.KcpURL)
 	}
 	if gotBody.SAToken != "stub-sa-token" {
 		t.Errorf("saToken = %q, want stub-sa-token", gotBody.SAToken)
@@ -170,7 +170,7 @@ func TestHandshake_403_StaysUnconnectedWithReason(t *testing.T) {
 	fx := newFixture(t, srv.URL)
 	r, cl := newReconcilerAndClient(t, srv, fx)
 
-	res, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant)
+	res, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant, "test-cluster")
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestHandshake_202_StaysUnconnectedWithReason(t *testing.T) {
 	fx := newFixture(t, srv.URL)
 	r, cl := newReconcilerAndClient(t, srv, fx)
 
-	res, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant)
+	res, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant, "test-cluster")
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestHandshake_InvalidToken_SurfacesOnAccepted(t *testing.T) {
 		}).
 		WithCABundleReader(func() ([]byte, error) { return nil, nil })
 
-	if _, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant); err != nil {
+	if _, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant, "test-cluster"); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	accepted := apimeta.FindStatusCondition(fx.grant.Status.Conditions, pmaccessv1alpha1.AccessGrantConditionAccepted)
@@ -252,7 +252,7 @@ func TestHandshake_MissingExternalURL_Refuses(t *testing.T) {
 
 	r := NewReconciler(nil, cfg)
 
-	if _, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant); err != nil {
+	if _, err := r.reconcile(context.Background(), testLog(t), cl, fx.grant, "test-cluster"); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	accepted := apimeta.FindStatusCondition(fx.grant.Status.Conditions, pmaccessv1alpha1.AccessGrantConditionAccepted)
