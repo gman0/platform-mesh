@@ -90,7 +90,7 @@ Legend: ☐ not started · ◐ in progress · ☑ done
 - ☑ `protocol/access/replaycache.go` — bounded TTL map + tests
 - ☑ `protocol/Taskfile.yaml` — standard component Taskfile for the new module
 - ☑ Root `Taskfile.yaml` — `protocol` + `sdk` registered in `COMPONENTS` + `LIBRARIES`
-- ◐ CRD manifests via `controller-gen` — `providers.*` already regenerates through `operators/platform-mesh-operator/Taskfile.yaml manifests` (picks up new PAR + extended Provider); `access-sdk.*` wired through `sdk/Taskfile.yaml generate` into new chart `charts/platform-mesh-access-sdk-crds/`. `access.*` (AccessGrant) CRD + apigen are deferred to Stage 1 where they'll live next to the new `operators/access-operator/` that owns the type's semantics — pm-operator only *creates* AccessGrants (via PAR reconciler), doesn't reconcile them.
+- ◐ CRD manifests via `controller-gen` — `providers.*` already regenerates through `operators/platform-mesh-operator/Taskfile.yaml manifests` (picks up new PAR + extended Provider); `access-sdk.*` wired through `sdk/Taskfile.yaml generate` into new chart `charts/platform-mesh-sdk-access-crds/`. `access.*` (AccessGrant) CRD + apigen are deferred to Stage 1 where they'll live next to the new `operators/access-operator/` that owns the type's semantics — pm-operator only *creates* AccessGrants (via PAR reconciler), doesn't reconcile them.
 - ◐ CEL validation rules — `Provider.spec.remote` immutability landed on `provider_types.go`; `AccessIdentity.spec.accept` enum landed via `+kubebuilder:validation:Enum=Always;Manual`. Nothing else needed for Stage 0.
 - ☐ CI green
 
@@ -153,7 +153,7 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   - Covered by 5 unit tests: 200 happy path, unknown identity, wrong HMAC, replay, Manual deferred.
 - ☑ Chart + Dockerfile for the SDK binary.
   - `sdk/access/Dockerfile` — multi-stage build, context at repo root, mirrors access-operator's pattern.
-  - `charts/platform-mesh-access-sdk/` — Deployment + Service + SA + RBAC + cert-manager Certificate (optional via `tls.issuerRef`). Depends on `charts/common`. Values: `publicUrl` (required), `tls.{secretName,dnsNames,issuerRef}`, `service.type`, `image.*`, `operator.leaderElect`.
+  - `charts/platform-mesh-sdk-access/` — Deployment + Service + SA + RBAC + cert-manager Certificate (optional via `tls.issuerRef`). Depends on `charts/common`. Values: `publicUrl` (required), `tls.{secretName,dnsNames,issuerRef}`, `service.type`, `image.*`, `operator.leaderElect`.
 - ☐ E2E test: AccessIdentity on one kind cluster, PM-side on another (or two workspaces in one kind) — full chain, kubeconfig lands, dummy operator can use it. **This is PR 5**, depends on PR 2+3+4 and the SDK chart/Dockerfile if we want kind deployment.
 
 **Deliverable**: full RFC 012 happy path works for the `Always` accept mode.

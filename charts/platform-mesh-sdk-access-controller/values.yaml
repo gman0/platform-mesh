@@ -1,5 +1,10 @@
 crds:
-  enabled: true
+  # Install CRDs as a subchart of this release. Default off: the
+  # platform-mesh-sdk-access-crds chart is expected to be installed
+  # once, independently, so controller + server releases can coexist
+  # without racing to own the CRDs. Flip to true for single-chart dev
+  # installs.
+  enabled: false
 
 image:
   # -- Image registry.

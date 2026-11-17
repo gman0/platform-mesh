@@ -1,4 +1,4 @@
-# platform-mesh-access-sdk-server
+# platform-mesh-sdk-access-server
 
 A Helm chart to deploy the Platform Mesh access SDK /access HTTP server on a user-side cluster.
 
@@ -49,7 +49,7 @@ Example
 3) .Values.deployment.resources.limits.memory = 1024MB
 4) .Values.common.defaults.deployment.resources.limits.memory = default 512MB
 ```
-# platform-mesh-access-sdk-server
+# platform-mesh-sdk-access-server
 
 ![Version: 0.0.0](https://img.shields.io/badge/Version-0.0.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.0.0](https://img.shields.io/badge/AppVersion-0.0.0-informational?style=flat-square)
 
@@ -60,7 +60,7 @@ A Helm chart to deploy the Platform Mesh access SDK /access HTTP server on a use
 | Repository | Name | Version |
 |------------|------|---------|
 | file://../common | common | 0.0.0 |
-| file://../platform-mesh-access-sdk-crds | platform-mesh-access-sdk-crds | 0.0.0 |
+| file://../platform-mesh-sdk-access-crds | platform-mesh-sdk-access-crds | 0.0.0 |
 
 ## Values
 

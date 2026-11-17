@@ -1,4 +1,4 @@
-# platform-mesh-access-sdk-crds
+# platform-mesh-sdk-access-crds
 
 A Helm chart for Kubernetes
 

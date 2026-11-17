@@ -31,7 +31,7 @@ vars:
   # User-side (access SDK) CRDs land in a sibling Helm chart alongside
   # the PM-side chart under charts/. The chart ships to user-side
   # clusters where the access SDK runs.
-  ACCESS_SDK_CRDS: /charts/platform-mesh-access-sdk-crds/templates
+  ACCESS_SDK_CRDS: /charts/platform-mesh-sdk-access-crds/templates
 
 tasks:
   build:
