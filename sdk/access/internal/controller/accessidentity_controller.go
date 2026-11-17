@@ -74,11 +74,6 @@ func accessTokenSecretName(identity *accessv1alpha1.AccessIdentity) string {
 type AccessIdentityReconciler struct {
 	Client ctrlruntimeclient.Client
 	Scheme *runtime.Scheme
-
-	// PublicURL is the base URL that user-side cluster publishes for
-	// /access. Encoded into the wire token so PM dials this exact host.
-	// Required; reconciler errors out if empty when minting.
-	PublicURL string
 }
 
 func (r *AccessIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -103,9 +98,6 @@ func (r *AccessIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return ctrl.Result{}, r.Client.Status().Update(ctx, identity)
 		}
 		// First mint.
-		if r.PublicURL == "" {
-			return ctrl.Result{}, fmt.Errorf("AccessIdentityReconciler: PublicURL is required to mint access tokens")
-		}
 		return r.mint(ctx, identity, secretName)
 
 	case err != nil:
@@ -152,7 +144,6 @@ func (r *AccessIdentityReconciler) mint(ctx context.Context, identity *accessv1a
 	}
 
 	wire := pmaccessproto.Token{
-		URL:     r.PublicURL,
 		TokenID: tokenID,
 		Secret:  hmacSecret,
 	}.String()

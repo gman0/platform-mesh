@@ -80,9 +80,8 @@ spec:
               accessTokenSecretRef:
                 description: |-
                   accessTokenSecretRef references a Secret containing the pma1 access
-                  token obtained from the user-side cluster. The access SDK's /access
-                  URL and the HMAC credential for the initial handshake are derived
-                  from the token's wire form.
+                  token obtained from the user-side cluster. The HMAC credential for
+                  the initial handshake is derived from the token's wire form.
                 properties:
                   key:
                     default: accessToken
@@ -100,6 +99,12 @@ spec:
                 - name
                 - namespace
                 type: object
+              accessURL:
+                description: |-
+                  accessURL is the user-side access SDK's /access endpoint. Supplied
+                  by the Owner alongside the access token. Propagated to the
+                  AccessGrant and to Provider.status.remote.accessURL.
+                type: string
               providerRef:
                 description: |-
                   providerRef references the Provider this request is binding to by
@@ -120,6 +125,7 @@ spec:
                 x-kubernetes-map-type: atomic
             required:
             - accessTokenSecretRef
+            - accessURL
             - providerRef
             type: object
           status:

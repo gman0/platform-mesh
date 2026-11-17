@@ -60,7 +60,6 @@ type testFixture struct {
 func newFixture(t *testing.T, accessURL string) testFixture {
 	t.Helper()
 	tok := pmaccessproto.Token{
-		URL:     accessURL,
 		TokenID: "id-xyz",
 		Secret:  []byte("hmac-secret-material"),
 	}

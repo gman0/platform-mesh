@@ -60,7 +60,6 @@ type testIdentity struct {
 func newIdentity(t *testing.T, accept accessv1alpha1.AcceptMode) testIdentity {
 	t.Helper()
 	tok := pmaccessproto.Token{
-		URL:     "https://access.customer.example/access",
 		TokenID: "id-xyz",
 		Secret:  []byte("hmac-key-material-32-bytes-------"),
 	}

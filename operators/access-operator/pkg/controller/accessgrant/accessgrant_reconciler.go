@@ -83,9 +83,10 @@ type Reconciler struct {
 	readCABundle func() ([]byte, error)
 
 	// versionCache memoizes the picked handshake version per base
-	// URL, keyed by Token.URL. Populated by negotiateVersion on the
-	// first handshake attempt to a given provider and invalidated
-	// whenever a dial to the picked version fails.
+	// URL, keyed by AccessGrant.spec.accessURL. Populated by
+	// negotiateVersion on the first handshake attempt to a given
+	// provider and invalidated whenever a dial to the picked version
+	// fails.
 	versionCacheMu sync.Mutex
 	versionCache   map[string]string
 }
@@ -242,14 +243,14 @@ func (r *Reconciler) reconcile(ctx context.Context, log *logger.Logger, cl ctrlr
 		return ctrl.Result{}, fmt.Errorf("build HTTP client for /access: %w", err)
 	}
 
-	version, cached := r.cachedVersion(parsed.URL)
+	version, cached := r.cachedVersion(grant.Spec.AccessURL)
 	if !cached {
-		picked, serverVersions, nerr := negotiateVersion(ctx, client, parsed.URL)
+		picked, serverVersions, nerr := negotiateVersion(ctx, client, grant.Spec.AccessURL)
 		if nerr != nil {
-			log.Info().Err(nerr).Str("url", parsed.URL).Msg("/versions probe failed")
+			log.Info().Err(nerr).Str("url", grant.Spec.AccessURL).Msg("/versions probe failed")
 			setConnected(grant, metav1.ConditionFalse,
 				pmaccessv1alpha1.AccessGrantReasonAccessURLUnreachable,
-				fmt.Sprintf("probe %s/versions: %v", parsed.URL, nerr))
+				fmt.Sprintf("probe %s/versions: %v", grant.Spec.AccessURL, nerr))
 			return ctrl.Result{RequeueAfter: retryUnreachable}, nil
 		}
 		if picked == "" {
@@ -259,7 +260,7 @@ func (r *Reconciler) reconcile(ctx context.Context, log *logger.Logger, cl ctrlr
 					serverVersions, pmaccessproto.SupportedVersions))
 			return ctrl.Result{RequeueAfter: retryRejected}, nil
 		}
-		r.setCachedVersion(parsed.URL, picked)
+		r.setCachedVersion(grant.Spec.AccessURL, picked)
 		version = picked
 	}
 
@@ -282,7 +283,7 @@ func (r *Reconciler) reconcile(ctx context.Context, log *logger.Logger, cl ctrlr
 		return ctrl.Result{}, fmt.Errorf("sign JWT call credential: %w", err)
 	}
 
-	accessURL, err := url.JoinPath(parsed.URL, pmaccessproto.AccessPath(version))
+	accessURL, err := url.JoinPath(grant.Spec.AccessURL, pmaccessproto.AccessPath(version))
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("build /access URL: %w", err)
 	}
@@ -299,7 +300,7 @@ func (r *Reconciler) reconcile(ctx context.Context, log *logger.Logger, cl ctrlr
 		// Dial failure may mean the server dropped our cached version
 		// (e.g. SDK upgraded past it). Invalidate so the next retry
 		// re-probes /versions.
-		r.invalidateCachedVersion(parsed.URL)
+		r.invalidateCachedVersion(grant.Spec.AccessURL)
 		setConnected(grant, metav1.ConditionFalse,
 			pmaccessv1alpha1.AccessGrantReasonAccessURLUnreachable,
 			fmt.Sprintf("dial %s: %v", accessURL, err))

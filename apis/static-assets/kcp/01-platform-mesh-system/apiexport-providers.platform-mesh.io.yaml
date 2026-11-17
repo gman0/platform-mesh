@@ -71,7 +71,7 @@ spec:
   resources:
   - group: providers.platform-mesh.io
     name: provideraccessrequests
-    schema: v261105-60b7f2ed.provideraccessrequests.providers.platform-mesh.io
+    schema: v261117-bb488107.provideraccessrequests.providers.platform-mesh.io
     storage:
       crd: {}
   - group: providers.platform-mesh.io

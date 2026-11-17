@@ -24,7 +24,6 @@ import (
 
 func TestTokenRoundTrip(t *testing.T) {
 	in := Token{
-		URL:     "https://access.example/access",
 		TokenID: "id-123",
 		Secret:  []byte("secret-material"),
 	}
@@ -32,9 +31,6 @@ func TestTokenRoundTrip(t *testing.T) {
 	got, err := ParseToken(in.String())
 	if err != nil {
 		t.Fatalf("ParseToken: %v", err)
-	}
-	if got.URL != in.URL {
-		t.Errorf("URL mismatch: got %q, want %q", got.URL, in.URL)
 	}
 	if got.TokenID != in.TokenID {
 		t.Errorf("TokenID mismatch: got %q, want %q", got.TokenID, in.TokenID)
@@ -45,8 +41,7 @@ func TestTokenRoundTrip(t *testing.T) {
 }
 
 func TestParseTokenRejects(t *testing.T) {
-	// Build a valid baseline we'll mutate.
-	valid := Token{URL: "https://a.example/access", TokenID: "id", Secret: []byte("s")}.String()
+	valid := Token{TokenID: "id", Secret: []byte("s")}.String()
 
 	cases := []struct {
 		name string
@@ -54,12 +49,11 @@ func TestParseTokenRejects(t *testing.T) {
 	}{
 		{"empty", ""},
 		{"wrong prefix", "pma0." + valid[5:]},
-		{"too few segments", "pma1.abc.def"},
+		{"too few segments", "pma1.abc"},
 		{"too many segments", valid + ".extra"},
-		{"non-base64url url", "pma1.***.id.cw"},
-		{"empty url", "pma1..id.cw"},
-		{"empty tokenID", "pma1.aHR0cHM.." /* missing trailing */ + "cw"},
-		{"empty secret", "pma1." + "aHR0cHM.id."},
+		{"empty tokenID", "pma1..cw"},
+		{"empty secret", "pma1.id."},
+		{"non-base64url secret", "pma1.id.***"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,10 +65,10 @@ func TestParseTokenRejects(t *testing.T) {
 }
 
 func TestTokenStringUsesRawBase64URL(t *testing.T) {
-	// Raw (unpadded) base64url means '=' never appears on the wire; the
-	// token format relies on splitting by '.' and would break if the
-	// encoded URL / secret segment contained '.' or '='.
-	tok := Token{URL: "https://a.example/access", TokenID: "id", Secret: []byte{0}}
+	// Raw (unpadded) base64url means '=' never appears on the wire;
+	// the token format relies on splitting by '.' and would break if
+	// the encoded secret segment contained '=' (padding).
+	tok := Token{TokenID: "id", Secret: []byte{0}}
 	s := tok.String()
 	for _, c := range s {
 		if c == '=' {

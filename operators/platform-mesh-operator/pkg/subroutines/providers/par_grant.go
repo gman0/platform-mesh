@@ -185,7 +185,7 @@ func (r *PARGrantSubroutine) Process(ctx context.Context, obj ctrlruntimeclient.
 	grant := &pmaccessv1alpha1.AccessGrant{ObjectMeta: metav1.ObjectMeta{Name: providerAccessGrantName(provider.Name), Namespace: providerSANamespace}}
 	if _, err := controllerutil.CreateOrUpdate(ctx, providerWsClient, grant, func() error {
 		grant.Spec.SARef = corev1.LocalObjectReference{Name: providerServiceAccountName(provider)}
-		grant.Spec.AccessURL = parsed.URL
+		grant.Spec.AccessURL = par.Spec.AccessURL
 		grant.Spec.AccessTokenSecretRef = pmaccessv1alpha1.AccessTokenSecretRef{
 			Name: mirrorName,
 			Key:  parAccessTokenSecretKey,
@@ -202,7 +202,7 @@ func (r *PARGrantSubroutine) Process(ctx context.Context, obj ctrlruntimeclient.
 		provider.Status.Remote = &pmprovidersv1alpha1.ProviderRemoteStatus{}
 	}
 	provider.Status.Remote.TokenID = parsed.TokenID
-	provider.Status.Remote.AccessURL = parsed.URL
+	provider.Status.Remote.AccessURL = par.Spec.AccessURL
 	if err := cl.Status().Update(ctx, provider); err != nil {
 		return subroutines.OK(), gcerrors.Wrap(err, "update Provider.status.remote for %s", provider.Name)
 	}

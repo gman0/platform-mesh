@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -61,7 +60,7 @@ const cacheSyncTimeout = 2 * time.Minute
 
 func main() {
 	var (
-		publicURL    string
+		pathPrefix   string
 		tlsCertFile  string
 		tlsKeyFile   string
 		accessListen string
@@ -70,7 +69,7 @@ func main() {
 		leaderElect  bool
 	)
 
-	pflag.StringVar(&publicURL, "public-url", "", "External URL for /access, encoded into minted access tokens. Required.")
+	pflag.StringVar(&pathPrefix, "path-prefix", "", "URL path prefix to mount /versions and /vN/access under. Leave empty for root. Use when fronting the SDK with an ingress that preserves a prefix (e.g. \"/platform-mesh\").")
 	pflag.StringVar(&tlsCertFile, "tls-cert-file", "", "Path to PEM-encoded TLS cert for /access. Leave empty to serve plain HTTP (expects TLS termination upstream).")
 	pflag.StringVar(&tlsKeyFile, "tls-key-file", "", "Path to PEM-encoded TLS key for /access. Must be set together with --tls-cert-file.")
 	pflag.StringVar(&accessListen, "access-listen", ":8443", "Listen address for the /access server.")
@@ -82,10 +81,6 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 	setupLog := ctrl.Log.WithName("setup")
 
-	if publicURL == "" {
-		setupLog.Error(fmt.Errorf("flag required"), "--public-url is required")
-		os.Exit(1)
-	}
 	// --tls-cert-file and --tls-key-file are optional, but both-or-neither.
 	// When unset, the server runs plain HTTP and TLS termination is
 	// expected to happen upstream (e.g. at an ingress / gateway).
@@ -115,9 +110,8 @@ func main() {
 	}
 
 	if err := (&accessctrl.AccessIdentityReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		PublicURL: publicURL,
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to register AccessIdentityReconciler")
 		os.Exit(1)
@@ -129,15 +123,9 @@ func main() {
 		ReplayCache: pmaccessproto.NewReplayCache(replayCacheSize),
 	}
 
-	// Honor any path prefix embedded in --public-url. Lets admins
-	// front the SDK with an ingress that keeps a prefix on the way
-	// through (e.g. https://host/platform-mesh/{versions,v1/access})
-	// without configuring ingress rewrites. Empty prefix = flat mount.
-	pathPrefix, err := publicURLPathPrefix(publicURL)
-	if err != nil {
-		setupLog.Error(err, "invalid --public-url")
-		os.Exit(1)
-	}
+	// Normalize --path-prefix: trim trailing slash so callers can
+	// concatenate "/versions" and "/v1/access" directly. Empty = root.
+	pathPrefix = strings.TrimRight(pathPrefix, "/")
 
 	// Mux routes: unauthenticated /versions probe + one /vN/access
 	// handler per supported handshake version. When adding v2, mount
@@ -167,7 +155,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting access SDK", "publicURL", publicURL, "listen", accessListen)
+	setupLog.Info("starting access SDK", "listen", accessListen, "pathPrefix", pathPrefix)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "manager stopped with error")
 		os.Exit(1)
@@ -241,16 +229,3 @@ func (r *accessHTTPRunnable) NeedLeaderElection() bool { return false }
 
 var _ manager.Runnable = (*accessHTTPRunnable)(nil)
 var _ manager.LeaderElectionRunnable = (*accessHTTPRunnable)(nil)
-
-// publicURLPathPrefix extracts the path prefix under which the SDK's
-// endpoints should be mounted, derived from --public-url. The
-// trailing slash is trimmed so callers can concatenate "/versions"
-// and "/v1/access" directly. Root path returns "".
-func publicURLPathPrefix(publicURL string) (string, error) {
-	u, err := url.Parse(publicURL)
-	if err != nil {
-		return "", fmt.Errorf("parse --public-url %q: %w", publicURL, err)
-	}
-	p := strings.TrimRight(u.Path, "/")
-	return p, nil
-}

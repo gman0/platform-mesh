@@ -90,10 +90,15 @@ type ProviderAccessRequestSpec struct {
 	// +required
 	ProviderRef corev1.LocalObjectReference `json:"providerRef"`
 
+	// accessURL is the user-side access SDK's /access endpoint. Supplied
+	// by the Owner alongside the access token. Propagated to the
+	// AccessGrant and to Provider.status.remote.accessURL.
+	// +required
+	AccessURL string `json:"accessURL"`
+
 	// accessTokenSecretRef references a Secret containing the pma1 access
-	// token obtained from the user-side cluster. The access SDK's /access
-	// URL and the HMAC credential for the initial handshake are derived
-	// from the token's wire form.
+	// token obtained from the user-side cluster. The HMAC credential for
+	// the initial handshake is derived from the token's wire form.
 	// +required
 	AccessTokenSecretRef AccessTokenSecretRef `json:"accessTokenSecretRef"`
 }
