@@ -14,19 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package access carries the wire-format primitives shared between the
-// PM-side access-operator and the user-side access SDK:
-//
-//   - the access token wire form pma1.<tokenID>.<secret>,
-//   - the per-/access call credential (JWT HS256) and its verification,
-//   - a bounded replay cache keyed by (tokenID, jti).
-//
-// The /access endpoint URL is intentionally *not* part of the token.
-// It is supplied out-of-band when a token is registered on the PM side
-// (e.g. ProviderAccessRequest.spec.accessURL), which lets operators
-// rotate ingress hostnames without re-minting tokens.
-//
-// See RFC 012 (remote access - baseline) for the protocol context.
 package access
 
 import (

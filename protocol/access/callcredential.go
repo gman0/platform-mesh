@@ -86,8 +86,7 @@ func SignCallCredential(secret []byte, tokenID string, body []byte, ttl time.Dur
 // ParseUnverified decodes the JWT without verifying its signature and
 // returns the claims. The user-side SDK needs sub (tokenID) to resolve
 // which AccessIdentity's HMAC secret to verify against; call Verify
-// afterwards with the resolved secret. Fails fast on a non-HS256
-// header to short-circuit algorithm-confusion attempts.
+// afterwards with the resolved secret.
 func ParseUnverified(token string) (CallClaims, error) {
 	parser := jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 	var claims CallClaims

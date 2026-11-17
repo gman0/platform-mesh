@@ -78,9 +78,6 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 	setupLog := ctrl.Log.WithName("setup")
 
-	// --tls-cert-file and --tls-key-file are optional, but both-or-neither.
-	// When unset, the server runs plain HTTP and TLS termination is
-	// expected to happen upstream (e.g. at an ingress / gateway).
 	if (tlsCertFile == "") != (tlsKeyFile == "") {
 		setupLog.Error(fmt.Errorf("flag combination invalid"), "--tls-cert-file and --tls-key-file must be set together, or both left empty")
 		os.Exit(1)
@@ -193,7 +190,7 @@ func (r *accessHTTPRunnable) Start(ctx context.Context) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	if r.tlsEnabled {
-		srv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		srv.TLSConfig = &tls.Config{}
 	}
 	errCh := make(chan error, 1)
 	go func() {

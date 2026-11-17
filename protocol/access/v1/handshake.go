@@ -14,13 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1 carries the v1 handshake request / response types for
-// POST /v1/access. The URL path pins the wire-version; a later v2
-// lives in protocol/access/v2.
 package v1
 
-// HandshakeRequest is the JSON body the PM-side access-operator POSTs
-// to /v1/access.
+// HandshakeRequest is the JSON body the PM-side access-operator POSTs to user-side /access.
 type HandshakeRequest struct {
 	// KcpURL is the PM kcp endpoint the user-side cluster should
 	// dial back with the delivered kubeconfig's bearer token.
@@ -33,7 +29,6 @@ type HandshakeRequest struct {
 	SAToken string `json:"saToken"`
 }
 
-// HandshakeResponse is reserved for future use. v1 returns 200 empty
-// on success; this struct exists so later versions have a clear
-// migration target.
+// HandshakeResponse is reserved for future use.
+// At the moment user-side sends empty 200 on success.
 type HandshakeResponse struct{}

@@ -38,7 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
-	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
@@ -55,7 +55,7 @@ const AccessOperatorLabelKey = "access-sdk.platform-mesh.io/kubeconfig"
 // TLS and listener wiring live in the SDK binary; this type is a
 // plain http.Handler mounted by the top-level mux at /v1/access.
 type Handler struct {
-	Client      ctrlruntimeclient.Client
+	Client      client.Client
 	Scheme      *runtime.Scheme
 	ReplayCache *pmaccessproto.ReplayCache
 }
@@ -81,21 +81,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	jwt := auth[len(prefix):]
 
-	// Peek sub to resolve which AccessIdentity this handshake is for.
+	// Read sub from the token to resolve which AccessIdentity this handshake is for.
+	// We don't trust it yet, so all the code below, up until Verify(), treats it as such.
 	pre, err := pmaccessproto.ParseUnverified(jwt)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("parse credential: %v", err), http.StatusForbidden)
 		return
 	}
 
-	identity, err := h.lookupIdentity(ctx, pre.Subject)
+	identity, err := h.findAccessIdentity(ctx, pre.Subject)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 
 	// Load HMAC secret from the owned Secret's pma1 wire string.
-	hmacSecret, err := h.loadHMACSecret(ctx, identity)
+	hmacSecret, err := h.findSecretForAccessIdentity(ctx, identity)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
@@ -115,9 +116,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Manual accept mode is deferred to Stage 4.
-	if identity.Spec.Accept == accessv1alpha1.AcceptModeManual {
-		http.Error(w, "AcceptModeManualDeferred", http.StatusForbidden)
+	if identity.Spec.Accept != accessv1alpha1.AcceptModeAlways {
+		http.Error(w, "NotImplemented", http.StatusNotImplemented)
 		return
 	}
 
@@ -132,18 +132,35 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.admit(ctx, identity, &payload); err != nil {
-		// Admission mutates cluster state; signal 500 so the operator
-		// retries rather than treating it as a terminal rejection.
+	// From here on we mutate cluster state; errors return 500 so the
+	// operator retries rather than treating it as a terminal rejection.
+	suffix, err := randSuffix()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("generate access suffix: %v", err), http.StatusInternalServerError)
+		return
+	}
+	accessName := identity.Name + "-" + suffix
+	kubeconfigSecretName := accessName + "-kubeconfig"
+
+	access, err := h.createAccess(ctx, identity, accessName, kubeconfigSecretName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := h.writeKubeconfigSecret(ctx, access, kubeconfigSecretName, identity.Namespace, &payload); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := h.markAccessActive(ctx, access); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *Handler) lookupIdentity(ctx context.Context, tokenID string) (*accessv1alpha1.AccessIdentity, error) {
+func (h *Handler) findAccessIdentity(ctx context.Context, tokenID string) (*accessv1alpha1.AccessIdentity, error) {
 	var list accessv1alpha1.AccessIdentityList
-	if err := h.Client.List(ctx, &list, ctrlruntimeclient.MatchingFields{accessctrl.TokenIDIndex: tokenID}); err != nil {
+	if err := h.Client.List(ctx, &list, client.MatchingFields{accessctrl.TokenIDIndex: tokenID}); err != nil {
 		return nil, fmt.Errorf("lookup AccessIdentity: %w", err)
 	}
 	switch len(list.Items) {
@@ -156,35 +173,28 @@ func (h *Handler) lookupIdentity(ctx context.Context, tokenID string) (*accessv1
 	}
 }
 
-func (h *Handler) loadHMACSecret(ctx context.Context, identity *accessv1alpha1.AccessIdentity) ([]byte, error) {
+func (h *Handler) findSecretForAccessIdentity(ctx context.Context, identity *accessv1alpha1.AccessIdentity) ([]byte, error) {
 	secret := &corev1.Secret{}
 	name := identity.Name + "-access-token"
 	if err := h.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: identity.Namespace}, secret); err != nil {
 		return nil, fmt.Errorf("get owned Secret %q: %w", name, err)
 	}
-	wire, ok := secret.Data[accessctrl.AccessTokenSecretKey]
-	if !ok || len(wire) == 0 {
+	key, ok := secret.Data[accessctrl.AccessTokenSecretKey]
+	if !ok || len(key) == 0 {
 		return nil, fmt.Errorf("owned Secret %q has no access-token value", name)
 	}
-	parsed, err := pmaccessproto.ParseToken(string(wire))
+	parsed, err := pmaccessproto.ParseToken(string(key))
 	if err != nil {
 		return nil, fmt.Errorf("owned Secret %q does not parse: %w", name, err)
 	}
 	return parsed.Secret, nil
 }
 
-// admit creates the Access CR, writes the kubeconfig Secret owned by
-// that Access, and marks the Access Phase=Active. Idempotency is best
-// effort via IsAlreadyExists tolerance; the replay cache is the
-// primary guard against duplicate admission for the same jti.
-func (h *Handler) admit(ctx context.Context, identity *accessv1alpha1.AccessIdentity, payload *pmaccessv1.HandshakeRequest) error {
-	suffix, err := randSuffix()
-	if err != nil {
-		return fmt.Errorf("generate access suffix: %w", err)
-	}
-	accessName := identity.Name + "-" + suffix
-	kubeconfigSecretName := accessName + "-kubeconfig"
+// Idempotency across the admission steps is best effort via
+// IsAlreadyExists tolerance; the replay cache is the primary guard
+// against duplicate admission for the same jti.
 
+func (h *Handler) createAccess(ctx context.Context, identity *accessv1alpha1.AccessIdentity, accessName, kubeconfigSecretName string) (*accessv1alpha1.Access, error) {
 	access := &accessv1alpha1.Access{
 		ObjectMeta: metav1.ObjectMeta{Name: accessName, Namespace: identity.Namespace},
 		Spec: accessv1alpha1.AccessSpec{
@@ -193,15 +203,18 @@ func (h *Handler) admit(ctx context.Context, identity *accessv1alpha1.AccessIden
 		},
 	}
 	if err := h.Client.Create(ctx, access); err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("create Access %q: %w", accessName, err)
+		return nil, fmt.Errorf("create Access %q: %w", accessName, err)
 	}
+	return access, nil
+}
 
+func (h *Handler) writeKubeconfigSecret(ctx context.Context, access *accessv1alpha1.Access, name, namespace string, payload *pmaccessv1.HandshakeRequest) error {
 	kubeconfigBytes, err := buildKubeconfig(payload)
 	if err != nil {
 		return fmt.Errorf("build kubeconfig: %w", err)
 	}
 
-	kcSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: kubeconfigSecretName, Namespace: identity.Namespace}}
+	kcSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}}
 	if _, err := controllerutil.CreateOrUpdate(ctx, h.Client, kcSecret, func() error {
 		if err := controllerutil.SetControllerReference(access, kcSecret, h.Scheme); err != nil {
 			return err
@@ -216,14 +229,17 @@ func (h *Handler) admit(ctx context.Context, identity *accessv1alpha1.AccessIden
 		kcSecret.Data[KubeconfigSecretKey] = kubeconfigBytes
 		return nil
 	}); err != nil {
-		return fmt.Errorf("upsert kubeconfig Secret %q: %w", kubeconfigSecretName, err)
+		return fmt.Errorf("upsert kubeconfig Secret %q: %w", name, err)
 	}
+	return nil
+}
 
+func (h *Handler) markAccessActive(ctx context.Context, access *accessv1alpha1.Access) error {
 	access.Status.Phase = accessv1alpha1.AccessPhaseActive
 	now := metav1.Now()
 	access.Status.LastRefreshed = &now
 	if err := h.Client.Status().Update(ctx, access); err != nil {
-		return fmt.Errorf("update Access.status for %q: %w", accessName, err)
+		return fmt.Errorf("update Access.status for %q: %w", access.Name, err)
 	}
 	return nil
 }

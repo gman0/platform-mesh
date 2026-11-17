@@ -28,11 +28,6 @@ const (
 	// AcceptModeAlways accepts any /access call that passes HMAC
 	// verification. The default for the direct deployment model.
 	AcceptModeAlways AcceptMode = "Always"
-
-	// AcceptModeManual queues an incoming /access call on
-	// AccessIdentity.status.pendingConnections and returns 202. The
-	// Provider approves by patching the identity. Deferred to Stage 4.
-	AcceptModeManual AcceptMode = "Manual"
 )
 
 // PendingConnection is an entry in AccessIdentity.status.pendingConnections

@@ -228,20 +228,3 @@ func TestHandler_Replay_403(t *testing.T) {
 		t.Errorf("replay dial = %d, want 403", resp2.StatusCode)
 	}
 }
-
-func TestHandler_ManualMode_DeferredTo403(t *testing.T) {
-	ti := newIdentity(t, accessv1alpha1.AcceptModeManual)
-	h := newHandler(t, ti)
-	srv := httptest.NewServer(h)
-	defer srv.Close()
-
-	payload := pmaccessv1.HandshakeRequest{KcpURL: "https://kcp", SAToken: "t"}
-	body, _ := json.Marshal(payload)
-	jwt, _ := pmaccessproto.SignCallCredential(ti.hmacSecret, ti.tokenID, body, 0)
-
-	resp := doPost(t, srv, jwt, body)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("status = %d, want 403 (Manual deferred)", resp.StatusCode)
-	}
-}

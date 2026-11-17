@@ -26,11 +26,6 @@ const (
 	// AccessPhaseActive means the delivered kubeconfig is being
 	// maintained (SA token renewal, CA bundle rotation).
 	AccessPhaseActive = "Active"
-
-	// AccessPhaseRevoked means the user-side SDK observed persistent 401
-	// against kcp and tore the kubeconfig down. The Access is kept for
-	// visibility until the Owner deletes it.
-	AccessPhaseRevoked = "Revoked"
 )
 
 // AccessSpec defines the desired state of an Access.
@@ -45,11 +40,6 @@ type AccessSpec struct {
 	// maintains this Secret.
 	// +optional
 	KubeconfigSecretRef *corev1.LocalObjectReference `json:"kubeconfigSecretRef,omitempty"`
-
-	// Follow-up: PM-wide identifier the user-side receives in the
-	// /access handshake so the user can tell which Access belongs to
-	// which PM instance. Shape and semantics TBD.
-	// PMInstance PMInstance `json:"pmInstance"`
 }
 
 // AccessStatus defines the observed state of an Access.
