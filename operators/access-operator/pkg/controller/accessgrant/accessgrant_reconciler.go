@@ -70,11 +70,6 @@ const (
 // it marks the AccessGrant Connected; 202 / 403 / network failures
 // stay unconnected with a Connected condition reason and a scheduled
 // requeue.
-//
-// All kcp reads/writes go through the mc-runtime cluster client the
-// manager hands in via mgr.ClusterFromContext — the AccessGrant and
-// its Secret / ServiceAccount all live in the same Provider Workspace
-// on PM's kcp.
 type Reconciler struct {
 	cfg          *config.OperatorConfig
 	mgr          mcmanager.Manager
@@ -146,6 +141,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req mcreconcile.Request) (ct
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get AccessGrant: %w", err)
+	}
+	if !grant.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
 	}
 
 	// Already connected — nothing to do until spec changes. A spec
