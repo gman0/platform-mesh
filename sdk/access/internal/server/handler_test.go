@@ -20,9 +20,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/go-logr/logr"
 
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 	pmaccessv1 "go.platform-mesh.io/protocol/access/v1"
@@ -94,6 +97,7 @@ func newHandler(t *testing.T, ti testIdentity) *Handler {
 		Client:      cl,
 		Scheme:      sch,
 		ReplayCache: pmaccessproto.NewReplayCache(0),
+		Log:         logr.Discard(),
 	}
 }
 
@@ -203,6 +207,110 @@ func TestHandler_VerifyFailure_WrongSecret_403(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+}
+
+func TestHandshake(t *testing.T) {
+	validPayload := func() []byte {
+		b, _ := json.Marshal(pmaccessv1.HandshakeRequest{KcpURL: "https://kcp", KcpCABundle: "ca", SAToken: "t"})
+		return b
+	}
+
+	t.Run("success returns identity and payload", func(t *testing.T) {
+		ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+		h := newHandler(t, ti)
+		body := validPayload()
+		jwt, err := pmaccessproto.SignCallCredential(ti.hmacSecret, ti.tokenID, body, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		vh, err := h.doHandshake(context.Background(), jwt, body)
+		if err != nil {
+			t.Fatalf("handshake: %v", err)
+		}
+		if vh.identity.Name != "customer" {
+			t.Errorf("identity.Name = %q, want customer", vh.identity.Name)
+		}
+		if vh.payload.KcpURL != "https://kcp" {
+			t.Errorf("payload.KcpURL = %q, want https://kcp", vh.payload.KcpURL)
+		}
+		if vh.jti == "" {
+			t.Errorf("jti is empty")
+		}
+	})
+
+	t.Run("accept mode other than Always returns 501", func(t *testing.T) {
+		ti := newIdentity(t, "non-existent-accept-mode")
+		h := newHandler(t, ti)
+		body := validPayload()
+		jwt, _ := pmaccessproto.SignCallCredential(ti.hmacSecret, ti.tokenID, body, 0)
+
+		_, err := h.doHandshake(context.Background(), jwt, body)
+		var he *httpError
+		if !errors.As(err, &he) {
+			t.Fatalf("err = %v, want *httpError", err)
+		}
+		if he.code != http.StatusNotImplemented {
+			t.Errorf("code = %d, want 501", he.code)
+		}
+	})
+
+	t.Run("verify failure returns 403", func(t *testing.T) {
+		ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+		h := newHandler(t, ti)
+		body := validPayload()
+		jwt, _ := pmaccessproto.SignCallCredential([]byte("wrong-secret"), ti.tokenID, body, 0)
+
+		_, err := h.doHandshake(context.Background(), jwt, body)
+		var he *httpError
+		if !errors.As(err, &he) {
+			t.Fatalf("err = %v, want *httpError", err)
+		}
+		if he.code != http.StatusForbidden {
+			t.Errorf("code = %d, want 403", he.code)
+		}
+	})
+
+	t.Run("invalid body returns 403", func(t *testing.T) {
+		ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+		h := newHandler(t, ti)
+		body := []byte(`{"kcpURL":"","saToken":""}`)
+		jwt, _ := pmaccessproto.SignCallCredential(ti.hmacSecret, ti.tokenID, body, 0)
+
+		_, err := h.doHandshake(context.Background(), jwt, body)
+		var he *httpError
+		if !errors.As(err, &he) {
+			t.Fatalf("err = %v, want *httpError", err)
+		}
+		if he.code != http.StatusForbidden {
+			t.Errorf("code = %d, want 403", he.code)
+		}
+	})
+}
+
+func TestCommit(t *testing.T) {
+	ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+	h := newHandler(t, ti)
+	vh := &validatedHandshake{
+		identity: ti.identity,
+		payload:  &pmaccessv1.HandshakeRequest{KcpURL: "https://kcp", KcpCABundle: "ca", SAToken: "t"},
+		jti:      "test-jti",
+	}
+
+	if err := h.doCommit(context.Background(), vh); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	var list accessv1alpha1.AccessList
+	if err := h.Client.List(context.Background(), &list); err != nil {
+		t.Fatalf("list Access: %v", err)
+	}
+	if len(list.Items) != 1 {
+		t.Fatalf("expected 1 Access, got %d", len(list.Items))
+	}
+	if list.Items[0].Status.Phase != accessv1alpha1.AccessPhaseActive {
+		t.Errorf("phase = %q, want Active", list.Items[0].Status.Phase)
 	}
 }
 

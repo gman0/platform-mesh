@@ -88,7 +88,7 @@ func SignCallCredential(secret []byte, tokenID string, body []byte, ttl time.Dur
 // which AccessIdentity's HMAC secret to verify against; call Verify
 // afterwards with the resolved secret.
 func ParseUnverified(token string) (CallClaims, error) {
-	parser := jwt.NewParser(jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+	parser := jwt.NewParser()
 	var claims CallClaims
 	parsed, _, err := parser.ParseUnverified(token, &claims)
 	if err != nil {
@@ -120,18 +120,13 @@ func Verify(secret []byte, token string, body []byte, skew time.Duration) (CallC
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 		jwt.WithLeeway(skew),
 	)
-	parsed, err := parser.ParseWithClaims(token, &claims, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, ErrBadAlgorithm
-		}
+	parsed, err := parser.ParseWithClaims(token, &claims, func(_ *jwt.Token) (interface{}, error) {
 		return secret, nil
 	})
 	if err != nil {
 		switch {
 		case errors.Is(err, jwt.ErrTokenExpired), errors.Is(err, jwt.ErrTokenNotValidYet):
 			return CallClaims{}, ErrCredExpired
-		case errors.Is(err, ErrBadAlgorithm):
-			return CallClaims{}, ErrBadAlgorithm
 		default:
 			return CallClaims{}, fmt.Errorf("%w: %v", ErrInvalidCred, err)
 		}

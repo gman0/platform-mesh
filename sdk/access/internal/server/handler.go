@@ -19,12 +19,14 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/go-logr/logr"
 
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 	pmaccessv1 "go.platform-mesh.io/protocol/access/v1"
@@ -48,6 +50,11 @@ const KubeconfigSecretKey = "kubeconfig"
 
 const AccessOperatorLabelKey = "access-sdk.platform-mesh.io/kubeconfig"
 
+// maxRequestBodyBytes caps the handshake request body. The payload
+// carries a URL, a PEM CA bundle, and a k8s SA token — well under
+// this ceiling. The cap is a DoS bound, not a shape check.
+const maxRequestBodyBytes = 64 << 10
+
 // Handler serves POST /v1/access against the user-side cluster. On a
 // verified handshake it writes the delivered kubeconfig as a Secret
 // owned by a freshly-created Access CR, and responds 200 empty.
@@ -58,6 +65,7 @@ type Handler struct {
 	Client      client.Client
 	Scheme      *runtime.Scheme
 	ReplayCache *pmaccessproto.ReplayCache
+	Log         logr.Logger
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -65,97 +73,137 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
-	ctx := r.Context()
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBodyBytes))
 	if err != nil {
 		http.Error(w, "read body", http.StatusBadRequest)
 		return
 	}
-
-	auth := r.Header.Get("Authorization")
-	const prefix = "Bearer "
-	if len(auth) <= len(prefix) || auth[:len(prefix)] != prefix {
-		http.Error(w, "missing Bearer credential", http.StatusForbidden)
+	jwt, err := parseBearer(r.Header.Get("Authorization"))
+	if err != nil {
+		writeError(w, h.Log, err)
 		return
 	}
-	jwt := auth[len(prefix):]
+	handshake, err := h.doHandshake(r.Context(), jwt, body)
+	if err != nil {
+		writeError(w, h.Log, err)
+		return
+	}
+	if err := h.doCommit(r.Context(), handshake); err != nil {
+		writeError(w, h.Log, err)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
 
+// verifiedCredential is the output of verifyCredential: the resolved
+// identity and the JWT's jti.
+type verifiedCredential struct {
+	identity *accessv1alpha1.AccessIdentity
+	jti      string
+}
+
+// validatedHandshake bundles the outputs of the read-only handshake
+// phase: the resolved identity, the decoded delivery payload, and the
+// JWT's jti. doCommit consumes this to persist the request.
+type validatedHandshake struct {
+	identity *accessv1alpha1.AccessIdentity
+	payload  *pmaccessv1.HandshakeRequest
+	jti      string
+}
+
+// doHandshake runs the read-only checks: verify the credential, enforce
+// the accept-mode gate, and decode the delivery body. All errors
+// carry an *httpError with a 4xx code.
+func (h *Handler) doHandshake(ctx context.Context, jwt string, body []byte) (*validatedHandshake, error) {
+	cred, err := h.verifyCredential(ctx, jwt, body)
+	if err != nil {
+		return nil, err
+	}
+	if cred.identity.Spec.Accept != accessv1alpha1.AcceptModeAlways {
+		return nil, httpErr(http.StatusNotImplemented, publicNotImplemented, nil)
+	}
+	payload, err := decodeDelivery(body)
+	if err != nil {
+		return nil, err
+	}
+	return &validatedHandshake{identity: cred.identity, payload: payload, jti: cred.jti}, nil
+}
+
+// verifyCredential resolves the identity named by the JWT's sub,
+// loads its HMAC secret, verifies the signature over jwt+body, and
+// records the jti in the replay cache.
+func (h *Handler) verifyCredential(ctx context.Context, jwt string, body []byte) (*verifiedCredential, error) {
 	// Read sub from the token to resolve which AccessIdentity this handshake is for.
 	// We don't trust it yet, so all the code below, up until Verify(), treats it as such.
 	pre, err := pmaccessproto.ParseUnverified(jwt)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("parse credential: %v", err), http.StatusForbidden)
-		return
+		return nil, httpErr(http.StatusForbidden, publicInvalidCredential, fmt.Errorf("parse credential: %w", err))
 	}
-
 	identity, err := h.findAccessIdentity(ctx, pre.Subject)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
+		return nil, httpErr(http.StatusForbidden, publicInvalidCredential, err)
 	}
-
-	// Load HMAC secret from the owned Secret's pma1 wire string.
 	hmacSecret, err := h.findSecretForAccessIdentity(ctx, identity)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
+		return nil, httpErr(http.StatusForbidden, publicInvalidCredential, err)
 	}
-
 	claims, err := pmaccessproto.Verify(hmacSecret, jwt, body, 0)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("verify: %v", err), http.StatusForbidden)
-		return
+		return nil, httpErr(http.StatusForbidden, publicInvalidCredential, fmt.Errorf("verify: %w", err))
 	}
+	if h.ReplayCache != nil && !h.ReplayCache.Seen(claims.Subject, claims.ID, claims.ExpiresAt.Time) {
+		return nil, httpErr(http.StatusForbidden, publicInvalidCredential, fmt.Errorf("replay for sub=%s jti=%s", claims.Subject, claims.ID))
+	}
+	return &verifiedCredential{identity: identity, jti: claims.ID}, nil
+}
 
-	// Replay check.
-	if h.ReplayCache != nil {
-		if !h.ReplayCache.Seen(claims.Subject, claims.ID, claims.ExpiresAt.Time) {
-			http.Error(w, "Replay", http.StatusForbidden)
-			return
-		}
-	}
-
-	if identity.Spec.Accept != accessv1alpha1.AcceptModeAlways {
-		http.Error(w, "NotImplemented", http.StatusNotImplemented)
-		return
-	}
-
-	// Parse delivery body.
-	var payload pmaccessv1.HandshakeRequest
-	if err := json.Unmarshal(body, &payload); err != nil {
-		http.Error(w, fmt.Sprintf("parse body: %v", err), http.StatusForbidden)
-		return
-	}
-	if payload.KcpURL == "" || payload.SAToken == "" {
-		http.Error(w, "body missing kcpURL or saToken", http.StatusForbidden)
-		return
-	}
-
-	// From here on we mutate cluster state; errors return 500 so the
-	// operator retries rather than treating it as a terminal rejection.
-	suffix, err := randSuffix()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("generate access suffix: %v", err), http.StatusInternalServerError)
-		return
-	}
-	accessName := identity.Name + "-" + suffix
+// doCommit mutates cluster state: creates the Access CR, writes the
+// kubeconfig Secret owned by it, and marks the Access Active. The
+// Access name is deterministic in (identity, jti) so that concurrent
+// replicas racing on the same jti collapse to a single admission via
+// AlreadyExists.
+func (h *Handler) doCommit(ctx context.Context, handshake *validatedHandshake) error {
+	accessName := buildAccessName(handshake.identity.Name, handshake.jti)
 	kubeconfigSecretName := accessName + "-kubeconfig"
 
-	access, err := h.createAccess(ctx, identity, accessName, kubeconfigSecretName)
+	access, err := h.createAccess(ctx, handshake.identity, accessName, kubeconfigSecretName)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return httpErr(http.StatusInternalServerError, publicInternalError, err)
 	}
-	if err := h.writeKubeconfigSecret(ctx, access, kubeconfigSecretName, identity.Namespace, &payload); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	if err := h.writeKubeconfigSecret(ctx, access, kubeconfigSecretName, handshake.identity.Namespace, handshake.payload); err != nil {
+		return httpErr(http.StatusInternalServerError, publicInternalError, err)
 	}
 	if err := h.markAccessActive(ctx, access); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return httpErr(http.StatusInternalServerError, publicInternalError, err)
 	}
-	w.WriteHeader(http.StatusOK)
+	return nil
+}
+
+// buildAccessName derives a deterministic Access CR name from an
+// identity name and a jti. Collisions on different jtis are bounded
+// by a 40-bit SHA-256 prefix (~2^-40).
+func buildAccessName(identityName, jti string) string {
+	sum := sha256.Sum256([]byte(jti))
+	return identityName + "-" + hex.EncodeToString(sum[:5])
+}
+
+func parseBearer(auth string) (string, error) {
+	const prefix = "Bearer "
+	if len(auth) <= len(prefix) || auth[:len(prefix)] != prefix {
+		return "", httpErr(http.StatusForbidden, publicForbidden, fmt.Errorf("missing Bearer credential"))
+	}
+	return auth[len(prefix):], nil
+}
+
+func decodeDelivery(body []byte) (*pmaccessv1.HandshakeRequest, error) {
+	var payload pmaccessv1.HandshakeRequest
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, httpErr(http.StatusForbidden, publicInvalidCredential, fmt.Errorf("parse body: %w", err))
+	}
+	if payload.KcpURL == "" || payload.SAToken == "" {
+		return nil, httpErr(http.StatusForbidden, publicInvalidCredential, fmt.Errorf("body missing kcpURL or saToken"))
+	}
+	return &payload, nil
 }
 
 func (h *Handler) findAccessIdentity(ctx context.Context, tokenID string) (*accessv1alpha1.AccessIdentity, error) {
@@ -189,10 +237,6 @@ func (h *Handler) findSecretForAccessIdentity(ctx context.Context, identity *acc
 	}
 	return parsed.Secret, nil
 }
-
-// Idempotency across the admission steps is best effort via
-// IsAlreadyExists tolerance; the replay cache is the primary guard
-// against duplicate admission for the same jti.
 
 func (h *Handler) createAccess(ctx context.Context, identity *accessv1alpha1.AccessIdentity, accessName, kubeconfigSecretName string) (*accessv1alpha1.Access, error) {
 	access := &accessv1alpha1.Access{
@@ -260,12 +304,4 @@ func buildKubeconfig(payload *pmaccessv1.HandshakeRequest) ([]byte, error) {
 	}
 	cfg.CurrentContext = "pm"
 	return clientcmd.Write(*cfg)
-}
-
-func randSuffix() (string, error) {
-	var buf [4]byte // 6 base64url chars
-	if _, err := rand.Read(buf[:]); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(buf[:]), nil
 }

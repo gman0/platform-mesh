@@ -32,7 +32,9 @@ import (
 	"time"
 
 	"github.com/spf13/pflag"
+	"golang.org/x/net/netutil"
 
+	"go.platform-mesh.io/golang-commons/logger"
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
 	accessctrl "go.platform-mesh.io/sdk/access/internal/controller"
@@ -43,7 +45,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
@@ -65,6 +66,9 @@ func main() {
 		accessListen string
 		metricsAddr  string
 		probeAddr    string
+		logLevel     string
+		logNoJSON    bool
+		enableHTTP2  bool
 	)
 
 	pflag.StringVar(&pathPrefix, "path-prefix", "", "URL path prefix to mount /versions and /vN/access under. Leave empty for root. Use when fronting the SDK with an ingress that preserves a prefix (e.g. \"/platform-mesh\").")
@@ -73,9 +77,21 @@ func main() {
 	pflag.StringVar(&accessListen, "access-listen", ":8443", "Listen address for the /access server.")
 	pflag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Metrics listen address.")
 	pflag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe listen address.")
+	pflag.StringVar(&logLevel, "log-level", "info", "Set the log level")
+	pflag.BoolVar(&logNoJSON, "no-json", false, "Disable JSON logging")
+	pflag.BoolVar(&enableHTTP2, "enable-http2", false, "Enable HTTP/2 for the /access server. Disabled by default to reduce the attack surface (CVE-2023-44487 et al.).")
 	pflag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+	logcfg := logger.DefaultConfig()
+	logcfg.Name = "access-server"
+	logcfg.Level = logLevel
+	logcfg.NoJSON = logNoJSON
+	log, err := logger.New(logcfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "unable to build logger: %v\n", err)
+		os.Exit(1)
+	}
+	ctrl.SetLogger(log.Logr())
 	setupLog := ctrl.Log.WithName("setup")
 
 	if (tlsCertFile == "") != (tlsKeyFile == "") {
@@ -88,10 +104,8 @@ func main() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(accessv1alpha1.AddToScheme(scheme))
 
-	// The server runs a manager with no controllers — just the shared
-	// cache + field indexer + health/metrics. Leader election is off:
-	// every replica serves /access (the replay cache is per-replica but
-	// AccessIdentity state guards against genuine replays via jti).
+	// Manager provides the shared cache, field indexer, and health /
+	// metrics endpoints. It runs no reconcilers.
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{
@@ -114,6 +128,7 @@ func main() {
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		ReplayCache: pmaccessproto.NewReplayCache(replayCacheSize),
+		Log:         ctrl.Log.WithName("access-handler"),
 	}
 
 	// Normalize --path-prefix: trim trailing slash so callers can
@@ -128,12 +143,13 @@ func main() {
 	mux.Handle(pathPrefix+pmaccessproto.AccessPath(pmaccessproto.V1), v1Handler)
 
 	if err := mgr.Add(&accessHTTPRunnable{
-		listen:     accessListen,
-		tlsEnabled: tlsEnabled,
-		certFile:   tlsCertFile,
-		keyFile:    tlsKeyFile,
-		handler:    mux,
-		cache:      mgr.GetCache(),
+		listen:      accessListen,
+		tlsEnabled:  tlsEnabled,
+		certFile:    tlsCertFile,
+		keyFile:     tlsKeyFile,
+		enableHTTP2: enableHTTP2,
+		handler:     mux,
+		cache:       mgr.GetCache(),
 	}); err != nil {
 		setupLog.Error(err, "unable to add /access server runnable")
 		os.Exit(1)
@@ -161,12 +177,13 @@ func main() {
 // a populated cache. When tlsEnabled is false the server runs plain
 // HTTP (for setups where TLS terminates at an upstream gateway).
 type accessHTTPRunnable struct {
-	listen     string
-	tlsEnabled bool
-	certFile   string
-	keyFile    string
-	handler    http.Handler
-	cache      cacheSyncer
+	listen      string
+	tlsEnabled  bool
+	certFile    string
+	keyFile     string
+	enableHTTP2 bool
+	handler     http.Handler
+	cache       cacheSyncer
 }
 
 // cacheSyncer narrows cache.Cache to the one method we need, so tests
@@ -183,21 +200,37 @@ func (r *accessHTTPRunnable) Start(ctx context.Context) error {
 		return fmt.Errorf("/access server: cache failed to sync within %s", cacheSyncTimeout)
 	}
 
+	// Transport-level limits for a public endpoint. Bounds slowloris
+	// and goroutine/fd exhaustion; volumetric DDoS still needs edge
+	// scrubbing (CDN/LB) in front.
 	srv := &http.Server{
 		Addr:              r.listen,
 		Handler:           r.handler,
 		BaseContext:       func(_ net.Listener) context.Context { return ctx },
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 	if r.tlsEnabled {
 		srv.TLSConfig = &tls.Config{}
+		if !r.enableHTTP2 {
+			srv.TLSConfig.NextProtos = []string{"http/1.1"}
+		}
 	}
+
+	ln, err := net.Listen("tcp", r.listen)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", r.listen, err)
+	}
+	ln = netutil.LimitListener(ln, 256)
+
 	errCh := make(chan error, 1)
 	go func() {
 		if r.tlsEnabled {
-			errCh <- srv.ListenAndServeTLS(r.certFile, r.keyFile)
+			errCh <- srv.ServeTLS(ln, r.certFile, r.keyFile)
 		} else {
-			errCh <- srv.ListenAndServe()
+			errCh <- srv.Serve(ln)
 		}
 	}()
 	select {
