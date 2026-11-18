@@ -118,7 +118,6 @@ type SubroutinesConfig struct {
 	Wait            WaitSubroutineConfig
 	ManagedProvider ManagedProviderSubroutinesConfig
 	Provider        ProviderSubroutinesConfig
-	PAR             PARSubroutinesConfig
 }
 
 type ControllerConfig struct {
@@ -193,10 +192,6 @@ func NewOperatorConfig() OperatorConfig {
 				Workspace:  ProviderSubroutineConfig{Enabled: true},
 				Kubeconfig: ProviderSubroutineConfig{Enabled: true},
 			},
-			PAR: PARSubroutinesConfig{
-				Resolve: PARSubroutineConfig{Enabled: true},
-				Grant:   PARSubroutineConfig{Enabled: true},
-			},
 		},
 	}
 }
@@ -245,9 +240,6 @@ func (c *OperatorConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&c.Subroutines.Provider.Workspace.Enabled, "subroutines-providers-workspace-enabled", c.Subroutines.Provider.Workspace.Enabled, "Enable Provider workspace subroutine")
 	fs.BoolVar(&c.Subroutines.Provider.Kubeconfig.Enabled, "subroutines-providers-kubeconfig-enabled", c.Subroutines.Provider.Kubeconfig.Enabled, "Enable Provider scoped-kubeconfig subroutine")
 
-	fs.BoolVar(&c.Subroutines.PAR.Resolve.Enabled, "subroutines-par-resolve-enabled", c.Subroutines.PAR.Resolve.Enabled, "Enable PAR resolve subroutine")
-	fs.BoolVar(&c.Subroutines.PAR.Grant.Enabled, "subroutines-par-grant-enabled", c.Subroutines.PAR.Grant.Enabled, "Enable PAR access-grant subroutine")
-
 	fs.StringVar(&c.Providers.ProvidersAPIExportEndpointSliceName, "providers-apiexport-endpointslice-name", c.Providers.ProvidersAPIExportEndpointSliceName, "Set name of the Providers APIExport endpoint slice to use")
 	fs.StringVar(&c.Providers.ProvidersAPIExportEndpointSliceWorkspace, "providers-apiexport-endpointslice-workspace", c.Providers.ProvidersAPIExportEndpointSliceWorkspace, "Set workspace of the Providers APIExport endpoint slice to use")
 
@@ -261,15 +253,6 @@ func (c *OperatorConfig) AddFlags(fs *pflag.FlagSet) {
 type ProviderSubroutinesConfig struct {
 	Workspace  ProviderSubroutineConfig
 	Kubeconfig ProviderSubroutineConfig
-}
-
-type PARSubroutineConfig struct {
-	Enabled bool
-}
-
-type PARSubroutinesConfig struct {
-	Resolve PARSubroutineConfig
-	Grant   PARSubroutineConfig
 }
 
 type ProvidersConfig struct {

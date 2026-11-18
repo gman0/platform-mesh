@@ -147,12 +147,6 @@ var DefaultProviderConnections = []pmcorev1alpha1.ProviderConnection{
 		Secret:    "virtual-workspaces-kubeconfig",
 		AdminAuth: ptr.To(true),
 	},
-	{
-		Path:           "root:platform-mesh-system",
-		Secret:         "access-operator-kubeconfig",
-		APIExportNames: []string{"access.platform-mesh.io"},
-		AdminAuth:      ptr.To(false),
-	},
 }
 
 var DEFAULT_WEBHOOK_CONFIGURATION = pmcorev1alpha1.WebhookConfiguration{
