@@ -49,8 +49,10 @@ type AccessStatus struct {
 	// +optional
 	Phase string `json:"phase,omitempty"`
 
-	// lastRefreshed is the time of the most recent successful SA token
-	// renewal against kcp.
+	// lastRefreshed is the time of the most recent successful SA-token
+	// renewal against kcp. The access SDK's renewal loop updates this
+	// after each TokenRequest; consumers treat an Access whose
+	// lastRefreshed is far behind the SA-token TTL as stale.
 	// +optional
 	LastRefreshed *metav1.Time `json:"lastRefreshed,omitempty"`
 

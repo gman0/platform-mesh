@@ -127,8 +127,7 @@ type ProviderStatus struct {
 type ProviderRemoteStatus struct {
 	// tokenID is the identifier derived from the access token. Safe to
 	// log; surfaced for out-of-band verification (an Owner can cross-check
-	// this against the token ID shown in the user-side AccessIdentity's
-	// pendingConnections queue when accept mode is Manual).
+	// this against the token ID shown on the user-side AccessIdentity).
 	// +optional
 	TokenID string `json:"tokenID,omitempty"`
 

@@ -28,14 +28,12 @@ import (
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 	pmaccessv1 "go.platform-mesh.io/protocol/access/v1"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
-	accessctrl "go.platform-mesh.io/sdk/access/internal/controller"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
-	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -53,25 +51,36 @@ func newServerScheme(t *testing.T) *runtime.Scheme {
 
 type testIdentity struct {
 	identity   *accessv1alpha1.AccessIdentity
-	tokenSecr  *corev1.Secret // owned token Secret
+	tokenSecr  *corev1.Secret // token Secret
 	hmacSecret []byte
 	tokenID    string
 }
 
-func newIdentity(t *testing.T, accept accessv1alpha1.AcceptMode) testIdentity {
+func newIdentity(t *testing.T) testIdentity {
 	t.Helper()
 	tok := pmaccessproto.Token{
 		TokenID: "id-xyz",
 		Secret:  []byte("hmac-key-material-32-bytes-------"),
 	}
 	identity := &accessv1alpha1.AccessIdentity{
-		ObjectMeta: metav1.ObjectMeta{Name: "customer", Namespace: "default"},
-		Spec:       accessv1alpha1.AccessIdentitySpec{Accept: accept},
+		ObjectMeta: metav1.ObjectMeta{Name: "customer", Namespace: "default", UID: "customer-uid"},
 		Status:     accessv1alpha1.AccessIdentityStatus{TokenID: tok.TokenID},
 	}
+	ctrlTrue := true
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "customer-access-token", Namespace: "default"},
-		Data:       map[string][]byte{accessctrl.AccessTokenSecretKey: []byte(tok.String())},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "customer-access-token",
+			Namespace: "default",
+			Labels:    map[string]string{accessv1alpha1.TokenIDLabelKey: tok.TokenID},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: accessv1alpha1.SchemeGroupVersion.String(),
+				Kind:       "AccessIdentity",
+				Name:       identity.Name,
+				UID:        identity.UID,
+				Controller: &ctrlTrue,
+			}},
+		},
+		Data: map[string][]byte{accessv1alpha1.AccessTokenSecretKey: []byte(tok.String())},
 	}
 	return testIdentity{identity: identity, tokenSecr: secret, hmacSecret: tok.Secret, tokenID: tok.TokenID}
 }
@@ -83,13 +92,6 @@ func newHandler(t *testing.T, ti testIdentity) *Handler {
 		WithScheme(sch).
 		WithObjects(ti.identity, ti.tokenSecr).
 		WithStatusSubresource(&accessv1alpha1.Access{}).
-		WithIndex(&accessv1alpha1.AccessIdentity{}, accessctrl.TokenIDIndex, func(obj ctrlruntimeclient.Object) []string {
-			id := obj.(*accessv1alpha1.AccessIdentity)
-			if id.Status.TokenID == "" {
-				return nil
-			}
-			return []string{id.Status.TokenID}
-		}).
 		Build()
 	return &Handler{
 		Client:      cl,
@@ -114,13 +116,13 @@ func doPost(t *testing.T, srv *httptest.Server, jwt string, body []byte) *http.R
 }
 
 func TestHandler_200_CreatesAccessAndKubeconfig(t *testing.T) {
-	ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+	ti := newIdentity(t)
 	h := newHandler(t, ti)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
 	payload := pmaccessv1.HandshakeRequest{
-		KcpURL:      "https://kcp.pm.example",
+		KcpURL:      "https://kcp.pm.example/clusters/root",
 		KcpCABundle: "ca-pem",
 		SAToken:     "sa-token-value",
 	}
@@ -158,15 +160,15 @@ func TestHandler_200_CreatesAccessAndKubeconfig(t *testing.T) {
 	if err := h.Client.Get(context.Background(), types.NamespacedName{Name: kcName, Namespace: "default"}, kcSecret); err != nil {
 		t.Fatalf("get kubeconfig Secret %q: %v", kcName, err)
 	}
-	kcBytes := kcSecret.Data[KubeconfigSecretKey]
+	kcBytes := kcSecret.Data[kubeconfigSecretKey]
 	if len(kcBytes) == 0 {
-		t.Fatalf("kubeconfig Secret has no %q data", KubeconfigSecretKey)
+		t.Fatalf("kubeconfig Secret has no %q data", kubeconfigSecretKey)
 	}
 	cfg, err := clientcmd.Load(kcBytes)
 	if err != nil {
 		t.Fatalf("parse kubeconfig: %v", err)
 	}
-	if cfg.Clusters["pm-kcp"].Server != "https://kcp.pm.example" {
+	if cfg.Clusters["pm-kcp"].Server != "https://kcp.pm.example/clusters/root" {
 		t.Errorf("kubeconfig server mismatch")
 	}
 	if cfg.AuthInfos["pm-sa"].Token != "sa-token-value" {
@@ -175,7 +177,7 @@ func TestHandler_200_CreatesAccessAndKubeconfig(t *testing.T) {
 }
 
 func TestHandler_UnknownIdentity_403(t *testing.T) {
-	ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+	ti := newIdentity(t)
 	h := newHandler(t, ti)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
@@ -192,7 +194,7 @@ func TestHandler_UnknownIdentity_403(t *testing.T) {
 }
 
 func TestHandler_VerifyFailure_WrongSecret_403(t *testing.T) {
-	ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+	ti := newIdentity(t)
 	h := newHandler(t, ti)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
@@ -209,12 +211,12 @@ func TestHandler_VerifyFailure_WrongSecret_403(t *testing.T) {
 
 func TestHandshake(t *testing.T) {
 	validPayload := func() []byte {
-		b, _ := json.Marshal(pmaccessv1.HandshakeRequest{KcpURL: "https://kcp", KcpCABundle: "ca", SAToken: "t"})
+		b, _ := json.Marshal(pmaccessv1.HandshakeRequest{KcpURL: "https://kcp/clusters/root", KcpCABundle: "ca", SAToken: "t"})
 		return b
 	}
 
 	t.Run("success returns identity and payload", func(t *testing.T) {
-		ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+		ti := newIdentity(t)
 		h := newHandler(t, ti)
 		body := validPayload()
 		jwt, err := pmaccessproto.SignCallCredential(ti.hmacSecret, ti.tokenID, body, 0)
@@ -229,32 +231,16 @@ func TestHandshake(t *testing.T) {
 		if vh.identity.Name != "customer" {
 			t.Errorf("identity.Name = %q, want customer", vh.identity.Name)
 		}
-		if vh.payload.KcpURL != "https://kcp" {
-			t.Errorf("payload.KcpURL = %q, want https://kcp", vh.payload.KcpURL)
+		if vh.payload.KcpURL != "https://kcp/clusters/root" {
+			t.Errorf("payload.KcpURL = %q, want https://kcp/clusters/root", vh.payload.KcpURL)
 		}
 		if vh.jti == "" {
 			t.Errorf("jti is empty")
 		}
 	})
 
-	t.Run("accept mode other than Always returns 501", func(t *testing.T) {
-		ti := newIdentity(t, "non-existent-accept-mode")
-		h := newHandler(t, ti)
-		body := validPayload()
-		jwt, _ := pmaccessproto.SignCallCredential(ti.hmacSecret, ti.tokenID, body, 0)
-
-		_, err := h.doHandshake(context.Background(), jwt, body)
-		var he *httpError
-		if !errors.As(err, &he) {
-			t.Fatalf("err = %v, want *httpError", err)
-		}
-		if he.code != http.StatusNotImplemented {
-			t.Errorf("code = %d, want 501", he.code)
-		}
-	})
-
 	t.Run("verify failure returns 403", func(t *testing.T) {
-		ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+		ti := newIdentity(t)
 		h := newHandler(t, ti)
 		body := validPayload()
 		jwt, _ := pmaccessproto.SignCallCredential([]byte("wrong-secret"), ti.tokenID, body, 0)
@@ -270,7 +256,7 @@ func TestHandshake(t *testing.T) {
 	})
 
 	t.Run("invalid body returns 403", func(t *testing.T) {
-		ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+		ti := newIdentity(t)
 		h := newHandler(t, ti)
 		body := []byte(`{"kcpURL":"","saToken":""}`)
 		jwt, _ := pmaccessproto.SignCallCredential(ti.hmacSecret, ti.tokenID, body, 0)
@@ -287,11 +273,11 @@ func TestHandshake(t *testing.T) {
 }
 
 func TestCommit(t *testing.T) {
-	ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+	ti := newIdentity(t)
 	h := newHandler(t, ti)
 	vh := &validatedHandshake{
 		identity: ti.identity,
-		payload:  &pmaccessv1.HandshakeRequest{KcpURL: "https://kcp", KcpCABundle: "ca", SAToken: "t"},
+		payload:  &pmaccessv1.HandshakeRequest{KcpURL: "https://kcp/clusters/root", KcpCABundle: "ca", SAToken: "t"},
 		jti:      "test-jti",
 	}
 
@@ -312,12 +298,12 @@ func TestCommit(t *testing.T) {
 }
 
 func TestHandler_Replay_403(t *testing.T) {
-	ti := newIdentity(t, accessv1alpha1.AcceptModeAlways)
+	ti := newIdentity(t)
 	h := newHandler(t, ti)
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	payload := pmaccessv1.HandshakeRequest{KcpURL: "https://kcp", KcpCABundle: "ca", SAToken: "t"}
+	payload := pmaccessv1.HandshakeRequest{KcpURL: "https://kcp/clusters/root", KcpCABundle: "ca", SAToken: "t"}
 	body, _ := json.Marshal(payload)
 	jwt, _ := pmaccessproto.SignCallCredential(ti.hmacSecret, ti.tokenID, body, 0)
 

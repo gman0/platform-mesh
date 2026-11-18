@@ -20,66 +20,44 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// AcceptMode controls how an incoming /access call is handled.
-// +kubebuilder:validation:Enum=Always;Manual
-type AcceptMode string
-
+// Conditions for the AccessIdentity type.
 const (
-	// AcceptModeAlways accepts any /access call that passes HMAC
-	// verification. The default for the direct deployment model.
-	AcceptModeAlways AcceptMode = "Always"
+	// AccessIdentityReady is the condition type reported on
+	// AccessIdentity.status.conditions.
+	AccessIdentityReady = "Ready"
 )
 
-// PendingConnection is an entry in AccessIdentity.status.pendingConnections
-// surfaced while spec.accept is Manual. Populated by the access SDK;
-// approved/denied by the Provider patching the identity.
-type PendingConnection struct {
-	// tokenID identifies the incoming /access call; matches the tokenID
-	// component of the access token.
-	// +required
-	TokenID string `json:"tokenID"`
+// Reasons for the AccessIdentityReady condition.
+const (
+	// AccessIdentityReadyReason: the access token has been minted and the
+	// current state of the status reflects it.
+	AccessIdentityReadyReason = "TokenReady"
 
-	// receivedAt is when the access SDK first saw the call.
-	// +required
-	ReceivedAt metav1.Time `json:"receivedAt"`
+	// AccessIdentityNotReadyAwaitingSecretReason: the Secret holding the access token
+	// is present but missing or malformed; the controller is waiting
+	// for it to be rewritten correctly.
+	AccessIdentityNotReadyAwaitingSecretReason = "AwaitingSecretWrite"
+)
 
-	// expiresAt is when this pending entry will be dropped if not
-	// approved. Derived from spec.pendingTTL.
-	// +required
-	ExpiresAt metav1.Time `json:"expiresAt"`
-}
+const (
+	// AccessTokenSecretKey is the Secret data key under which
+	// the access token is stored.
+	AccessTokenSecretKey = "accessToken"
+
+	// TokenIDLabelKey is name of the label to note down the associated
+	// token ID (e.g. on the managed kubeconfig Secret).
+	TokenIDLabelKey = "access-sdk.platform-mesh.io/token-id"
+)
 
 // AccessIdentitySpec defines the desired state of an AccessIdentity.
-type AccessIdentitySpec struct {
-	// accept controls how incoming /access calls are handled.
-	// Defaults to Always.
-	// +kubebuilder:default=Always
-	// +optional
-	Accept AcceptMode `json:"accept,omitempty"`
-
-	// maxPending caps the pending queue size while accept is Manual.
-	// +optional
-	MaxPending int32 `json:"maxPending,omitempty"`
-
-	// pendingTTL is how long a pending connection stays in the queue
-	// before being dropped. Only meaningful while accept is Manual.
-	// +optional
-	PendingTTL *metav1.Duration `json:"pendingTTL,omitempty"`
-}
+type AccessIdentitySpec struct{}
 
 // AccessIdentityStatus defines the observed state of an AccessIdentity.
 type AccessIdentityStatus struct {
 	// tokenID is the public portion of the access token minted for this
-	// identity. The full token lives in an owned Secret.
+	// identity. The full token lives in a Secret.
 	// +optional
 	TokenID string `json:"tokenID,omitempty"`
-
-	// pendingConnections lists /access calls awaiting manual approval.
-	// Populated only while spec.accept is Manual.
-	// +listType=map
-	// +listMapKey=tokenID
-	// +optional
-	PendingConnections []PendingConnection `json:"pendingConnections,omitempty"`
 
 	// conditions represent the current state of the AccessIdentity.
 	// +listType=map
@@ -96,14 +74,13 @@ type AccessIdentityStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced
-// +kubebuilder:printcolumn:JSONPath=".spec.accept",name="Accept",type=string
 // +kubebuilder:printcolumn:JSONPath=".status.tokenID",name="TokenID",type=string,priority=1
 // +kubebuilder:printcolumn:JSONPath=".metadata.creationTimestamp",name="Age",type=date
 
 // AccessIdentity is a standing authorization on the user-side cluster for
 // a PM instance to deliver kubeconfigs via /access. On creation, the
 // access SDK mints an access token (tokenID + HMAC secret), writes the
-// full token into an owned Secret, and starts serving /access calls
+// full token into a Secret, and starts serving /access calls
 // authenticated against that identity's HMAC secret. One AccessIdentity
 // maps to many Access objects over time.
 type AccessIdentity struct {

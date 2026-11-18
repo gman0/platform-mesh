@@ -38,7 +38,6 @@ import (
 	pmmws "go.platform-mesh.io/golang-commons/middleware"
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
-	accessctrl "go.platform-mesh.io/sdk/access/internal/controller"
 	accessserver "go.platform-mesh.io/sdk/access/internal/server"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -117,11 +116,6 @@ func main() {
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to build manager")
-		os.Exit(1)
-	}
-
-	if err := accessctrl.RegisterTokenIDIndex(mgr); err != nil {
-		setupLog.Error(err, "unable to register TokenID field indexer")
 		os.Exit(1)
 	}
 

@@ -15,7 +15,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v261106-dd002fb0.providers.providers.platform-mesh.io
+  name: v261118-e9f11089.providers.providers.platform-mesh.io
 spec:
   group: providers.platform-mesh.io
   names:
@@ -226,8 +226,7 @@ spec:
                   description: |-
                     tokenID is the identifier derived from the access token. Safe to
                     log; surfaced for out-of-band verification (an Owner can cross-check
-                    this against the token ID shown in the user-side AccessIdentity's
-                    pendingConnections queue when accept mode is Manual).
+                    this against the token ID shown on the user-side AccessIdentity).
                   type: string
               type: object
           type: object

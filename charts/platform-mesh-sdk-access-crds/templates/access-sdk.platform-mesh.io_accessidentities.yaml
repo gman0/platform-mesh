@@ -28,9 +28,6 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.accept
-      name: Accept
-      type: string
     - jsonPath: .status.tokenID
       name: TokenID
       priority: 1
@@ -45,7 +42,7 @@ spec:
           AccessIdentity is a standing authorization on the user-side cluster for
           a PM instance to deliver kubeconfigs via /access. On creation, the
           access SDK mints an access token (tokenID + HMAC secret), writes the
-          full token into an owned Secret, and starts serving /access calls
+          full token into a Secret, and starts serving /access calls
           authenticated against that identity's HMAC secret. One AccessIdentity
           maps to many Access objects over time.
         properties:
@@ -68,26 +65,6 @@ spec:
             type: object
           spec:
             description: spec defines the desired state of AccessIdentity.
-            properties:
-              accept:
-                default: Always
-                description: |-
-                  accept controls how incoming /access calls are handled.
-                  Defaults to Always.
-                enum:
-                - Always
-                - Manual
-                type: string
-              maxPending:
-                description: maxPending caps the pending queue size while accept is
-                  Manual.
-                format: int32
-                type: integer
-              pendingTTL:
-                description: |-
-                  pendingTTL is how long a pending connection stays in the queue
-                  before being dropped. Only meaningful while accept is Manual.
-                type: string
             type: object
           status:
             description: status defines the observed state of AccessIdentity.
@@ -158,45 +135,10 @@ spec:
                   access SDK.
                 format: int64
                 type: integer
-              pendingConnections:
-                description: |-
-                  pendingConnections lists /access calls awaiting manual approval.
-                  Populated only while spec.accept is Manual.
-                items:
-                  description: |-
-                    PendingConnection is an entry in AccessIdentity.status.pendingConnections
-                    surfaced while spec.accept is Manual. Populated by the access SDK;
-                    approved/denied by the Provider patching the identity.
-                  properties:
-                    expiresAt:
-                      description: |-
-                        expiresAt is when this pending entry will be dropped if not
-                        approved. Derived from spec.pendingTTL.
-                      format: date-time
-                      type: string
-                    receivedAt:
-                      description: receivedAt is when the access SDK first saw the
-                        call.
-                      format: date-time
-                      type: string
-                    tokenID:
-                      description: |-
-                        tokenID identifies the incoming /access call; matches the tokenID
-                        component of the access token.
-                      type: string
-                  required:
-                  - expiresAt
-                  - receivedAt
-                  - tokenID
-                  type: object
-                type: array
-                x-kubernetes-list-map-keys:
-                - tokenID
-                x-kubernetes-list-type: map
               tokenID:
                 description: |-
                   tokenID is the public portion of the access token minted for this
-                  identity. The full token lives in an owned Secret.
+                  identity. The full token lives in a Secret.
                 type: string
             type: object
         required:

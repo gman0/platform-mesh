@@ -25,10 +25,10 @@ func TestReplayCacheFirstAcceptsThenRejects(t *testing.T) {
 	c := NewReplayCache(0)
 	exp := time.Now().Add(time.Minute)
 
-	if !c.Seen("id", "jti-1", exp) {
+	if !c.AdmitIfNew("id", "jti-1", exp) {
 		t.Fatal("first Seen should return true")
 	}
-	if c.Seen("id", "jti-1", exp) {
+	if c.AdmitIfNew("id", "jti-1", exp) {
 		t.Fatal("second Seen for same (tokenID, jti) should return false")
 	}
 }
@@ -36,10 +36,10 @@ func TestReplayCacheFirstAcceptsThenRejects(t *testing.T) {
 func TestReplayCacheScopedByTokenID(t *testing.T) {
 	c := NewReplayCache(0)
 	exp := time.Now().Add(time.Minute)
-	if !c.Seen("id-a", "jti", exp) {
+	if !c.AdmitIfNew("id-a", "jti", exp) {
 		t.Fatal("first Seen id-a should accept")
 	}
-	if !c.Seen("id-b", "jti", exp) {
+	if !c.AdmitIfNew("id-b", "jti", exp) {
 		t.Fatal("same jti under different tokenID must accept (distinct Identities)")
 	}
 }
@@ -51,14 +51,14 @@ func TestReplayCacheExpiredEntriesEvicted(t *testing.T) {
 	now := time.Now()
 	c.now = func() time.Time { return now }
 
-	if !c.Seen("id", "jti", now.Add(time.Second)) {
+	if !c.AdmitIfNew("id", "jti", now.Add(time.Second)) {
 		t.Fatal("first Seen should accept")
 	}
 
 	// Advance past expiry; the next Seen on the same key should accept
 	// (treat the expired entry as absent).
 	now = now.Add(2 * time.Second)
-	if !c.Seen("id", "jti", now.Add(time.Second)) {
+	if !c.AdmitIfNew("id", "jti", now.Add(time.Second)) {
 		t.Fatal("after expiry, Seen should accept again")
 	}
 }
@@ -69,13 +69,13 @@ func TestReplayCacheMaxEntriesFailsClosed(t *testing.T) {
 	c.now = func() time.Time { return now }
 
 	exp := now.Add(time.Hour)
-	if !c.Seen("id", "a", exp) {
+	if !c.AdmitIfNew("id", "a", exp) {
 		t.Fatal("seat 1 should accept")
 	}
-	if !c.Seen("id", "b", exp) {
+	if !c.AdmitIfNew("id", "b", exp) {
 		t.Fatal("seat 2 should accept")
 	}
-	if c.Seen("id", "c", exp) {
+	if c.AdmitIfNew("id", "c", exp) {
 		t.Fatal("over cap: Seen must return false (fail closed)")
 	}
 }
@@ -85,17 +85,17 @@ func TestReplayCacheSweepReclaimsCapacity(t *testing.T) {
 	now := time.Now()
 	c.now = func() time.Time { return now }
 
-	if !c.Seen("id", "a", now.Add(time.Second)) {
+	if !c.AdmitIfNew("id", "a", now.Add(time.Second)) {
 		t.Fatal("seat 1")
 	}
-	if !c.Seen("id", "b", now.Add(time.Second)) {
+	if !c.AdmitIfNew("id", "b", now.Add(time.Second)) {
 		t.Fatal("seat 2")
 	}
 
 	// Advance past the two entries' expiry; a third insert should
 	// reclaim capacity on its own via the on-overflow sweep.
 	now = now.Add(2 * time.Second)
-	if !c.Seen("id", "c", now.Add(time.Minute)) {
+	if !c.AdmitIfNew("id", "c", now.Add(time.Minute)) {
 		t.Fatal("after expiry, a new Seen should reclaim capacity and accept")
 	}
 	if got := c.Len(); got != 1 {

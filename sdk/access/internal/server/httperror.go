@@ -28,7 +28,6 @@ import (
 const (
 	publicInvalidCredential = "InvalidCredential"
 	publicForbidden         = "Forbidden"
-	publicNotImplemented    = "NotImplemented"
 	publicInternalError     = "InternalError"
 )
 

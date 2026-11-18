@@ -21,14 +21,16 @@ import (
 	"time"
 )
 
-// ReplayCache is a bounded TTL map keyed by (tokenID, jti). It lets the
-// user-side /access handler reject a call credential whose jti it has
-// already seen within the credential's exp window.
+// ReplayCache tracks call credentials that have already been admitted,
+// so a captured credential cannot be used twice. Call credentials
+// carry a random jti and an expiry; this cache remembers each jti
+// (scoped by its tokenID) until the expiry passes.
 //
-// RFC 012 sizes the cache against the call-credential TTL
-// (DefaultCallCredentialTTL + skew = ~90s), so the working-set is tiny
-// per AccessIdentity. MaxEntries fails closed on overflow (treats new
-// entries as replays) rather than evicting silently.
+// The cache is size-bounded. When full, it fails closed: new entries
+// are rejected as if they were replays, instead of being silently
+// evicted. This keeps replay protection intact under load — a flood
+// of first-time credentials cannot push a real in-window jti out of
+// the cache and let an attacker re-admit it.
 type ReplayCache struct {
 	mu         sync.Mutex
 	entries    map[string]time.Time
@@ -37,8 +39,9 @@ type ReplayCache struct {
 }
 
 // NewReplayCache creates an empty cache. maxEntries <= 0 disables the
-// bound (no cap); callers running with untrusted input should pass a
-// positive cap.
+// size bound; callers exposed to untrusted input must pass a positive
+// cap so an attacker cannot exhaust memory by sending a stream of
+// first-time credentials.
 func NewReplayCache(maxEntries int) *ReplayCache {
 	return &ReplayCache{
 		entries:    make(map[string]time.Time),
@@ -47,13 +50,13 @@ func NewReplayCache(maxEntries int) *ReplayCache {
 	}
 }
 
-// Seen records (tokenID, jti) with the given expiry. Returns true if
-// this is the first time the cache has seen the pair (the caller
-// should accept the credential), false if it is a replay or the cache
-// is full (the caller should reject with 403).
-//
-// Expired entries are treated as absent and evicted opportunistically.
-func (c *ReplayCache) Seen(tokenID, jti string, exp time.Time) bool {
+// AdmitIfNew records (tokenID, jti) with its expiry, atomically with
+// the check for duplicates. Returns true when this pair has not been
+// seen before within its window — the caller may admit the credential.
+// Returns false when the pair is already recorded and still live (a
+// replay), or when the cache is at its size bound (fail-closed).
+// Expired entries are treated as absent and dropped on the way.
+func (c *ReplayCache) AdmitIfNew(tokenID, jti string, exp time.Time) bool {
 	key := tokenID + "|" + jti
 	now := c.now()
 

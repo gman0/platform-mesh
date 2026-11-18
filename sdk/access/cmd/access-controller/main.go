@@ -26,7 +26,8 @@ import (
 	"github.com/spf13/pflag"
 
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
-	accessctrl "go.platform-mesh.io/sdk/access/internal/controller"
+	accessctrl "go.platform-mesh.io/sdk/access/internal/controller/access"
+	identityctrl "go.platform-mesh.io/sdk/access/internal/controller/accessidentity"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -71,11 +72,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&accessctrl.AccessIdentityReconciler{
+	if err := (&identityctrl.Reconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to register AccessIdentityReconciler")
+		setupLog.Error(err, "unable to register AccessIdentity reconciler")
+		os.Exit(1)
+	}
+
+	if err := (&accessctrl.Reconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to register Access reconciler")
 		os.Exit(1)
 	}
 
