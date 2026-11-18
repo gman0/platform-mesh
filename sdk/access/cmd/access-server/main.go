@@ -35,6 +35,7 @@ import (
 	"golang.org/x/net/netutil"
 
 	"go.platform-mesh.io/golang-commons/logger"
+	pmmws "go.platform-mesh.io/golang-commons/middleware"
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
 	accessctrl "go.platform-mesh.io/sdk/access/internal/controller"
@@ -128,7 +129,6 @@ func main() {
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		ReplayCache: pmaccessproto.NewReplayCache(replayCacheSize),
-		Log:         ctrl.Log.WithName("access-handler"),
 	}
 
 	// Normalize --path-prefix: trim trailing slash so callers can
@@ -142,13 +142,21 @@ func main() {
 	mux.Handle(pathPrefix+pmaccessproto.VersionsPath, accessserver.VersionsHandler())
 	mux.Handle(pathPrefix+pmaccessproto.AccessPath(pmaccessproto.V1), v1Handler)
 
+	// Shared middleware chain: OTel tracing, Sentry panic recovery,
+	// request-scoped logger, request-id. auth=false because we do our
+	// own Bearer-JWT auth in the /access handler.
+	var handler http.Handler = mux
+	for _, mw := range pmmws.CreateMiddleware(log, false) {
+		handler = mw(handler)
+	}
+
 	if err := mgr.Add(&accessHTTPRunnable{
 		listen:      accessListen,
 		tlsEnabled:  tlsEnabled,
 		certFile:    tlsCertFile,
 		keyFile:     tlsKeyFile,
 		enableHTTP2: enableHTTP2,
-		handler:     mux,
+		handler:     handler,
 		cache:       mgr.GetCache(),
 	}); err != nil {
 		setupLog.Error(err, "unable to add /access server runnable")

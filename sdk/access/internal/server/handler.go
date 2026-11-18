@@ -25,8 +25,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-
-	"github.com/go-logr/logr"
+	"net/url"
 
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 	pmaccessv1 "go.platform-mesh.io/protocol/access/v1"
@@ -65,7 +64,6 @@ type Handler struct {
 	Client      client.Client
 	Scheme      *runtime.Scheme
 	ReplayCache *pmaccessproto.ReplayCache
-	Log         logr.Logger
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -80,16 +78,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	jwt, err := parseBearer(r.Header.Get("Authorization"))
 	if err != nil {
-		writeError(w, h.Log, err)
+		writeError(w, logFromRequest(r), err)
 		return
 	}
 	handshake, err := h.doHandshake(r.Context(), jwt, body)
 	if err != nil {
-		writeError(w, h.Log, err)
+		writeError(w, logFromRequest(r), err)
 		return
 	}
 	if err := h.doCommit(r.Context(), handshake); err != nil {
-		writeError(w, h.Log, err)
+		writeError(w, logFromRequest(r), err)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -203,6 +201,16 @@ func decodeDelivery(body []byte) (*pmaccessv1.HandshakeRequest, error) {
 	if payload.KcpURL == "" || payload.SAToken == "" {
 		return nil, httpErr(http.StatusForbidden, publicInvalidCredential, fmt.Errorf("body missing kcpURL or saToken"))
 	}
+	u, err := url.Parse(payload.KcpURL)
+	if err != nil {
+		return nil, httpErr(http.StatusForbidden, publicInvalidCredential, fmt.Errorf("parse kcpURL: %w", err))
+	}
+	if u.Scheme != "https" {
+		return nil, httpErr(http.StatusForbidden, publicInvalidCredential, fmt.Errorf("kcpURL scheme must be https, got %q", u.Scheme))
+	}
+	if u.Host == "" {
+		return nil, httpErr(http.StatusForbidden, publicInvalidCredential, fmt.Errorf("kcpURL missing host"))
+	}
 	return &payload, nil
 }
 
@@ -227,15 +235,15 @@ func (h *Handler) findSecretForAccessIdentity(ctx context.Context, identity *acc
 	if err := h.Client.Get(ctx, types.NamespacedName{Name: name, Namespace: identity.Namespace}, secret); err != nil {
 		return nil, fmt.Errorf("get owned Secret %q: %w", name, err)
 	}
-	key, ok := secret.Data[accessctrl.AccessTokenSecretKey]
-	if !ok || len(key) == 0 {
+	rawToken, ok := secret.Data[accessctrl.AccessTokenSecretKey]
+	if !ok || len(rawToken) == 0 {
 		return nil, fmt.Errorf("owned Secret %q has no access-token value", name)
 	}
-	parsed, err := pmaccessproto.ParseToken(string(key))
+	parsedToken, err := pmaccessproto.ParseToken(string(rawToken))
 	if err != nil {
 		return nil, fmt.Errorf("owned Secret %q does not parse: %w", name, err)
 	}
-	return parsed.Secret, nil
+	return parsedToken.Secret, nil
 }
 
 func (h *Handler) createAccess(ctx context.Context, identity *accessv1alpha1.AccessIdentity, accessName, kubeconfigSecretName string) (*accessv1alpha1.Access, error) {

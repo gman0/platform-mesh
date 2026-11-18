@@ -43,8 +43,8 @@ const (
 	// reasons onto.
 	readyConditionType = "Ready"
 
-	// AccessTokenSecretKey is the Secret data key under which the full
-	// pma1.<...> wire string is stored.
+	// AccessTokenSecretKey is the Secret data key under which the
+	// pma1.<tokenID>.<secret> access token is stored.
 	AccessTokenSecretKey = "accessToken"
 
 	// TokenIDIndex is the name of the field indexer registered on
@@ -107,20 +107,20 @@ func (r *AccessIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Secret exists — confirm status + Ready condition.
 	if identity.Status.TokenID == "" {
 		// Status was wiped out or hasn't converged after an earlier
-		// Create. Parse the wire string from the Secret to recover.
-		wire, ok := secret.Data[AccessTokenSecretKey]
-		if !ok || len(wire) == 0 {
+		// Create. Parse the access token from the Secret to recover.
+		rawToken, ok := secret.Data[AccessTokenSecretKey]
+		if !ok || len(rawToken) == 0 {
 			r.setReady(identity, metav1.ConditionFalse, ReasonAwaitingSecretWrite,
 				"owned Secret exists but has no access-token value")
 			return ctrl.Result{}, r.Client.Status().Update(ctx, identity)
 		}
-		parsed, perr := pmaccessproto.ParseToken(string(wire))
+		parsedToken, perr := pmaccessproto.ParseToken(string(rawToken))
 		if perr != nil {
 			r.setReady(identity, metav1.ConditionFalse, ReasonAwaitingSecretWrite,
 				fmt.Sprintf("owned Secret contents did not parse: %v", perr))
 			return ctrl.Result{}, r.Client.Status().Update(ctx, identity)
 		}
-		identity.Status.TokenID = parsed.TokenID
+		identity.Status.TokenID = parsedToken.TokenID
 		r.setReady(identity, metav1.ConditionTrue, ReasonTokenAdopted,
 			"adopted existing access token from owned Secret")
 		return ctrl.Result{}, r.Client.Status().Update(ctx, identity)

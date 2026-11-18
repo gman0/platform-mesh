@@ -39,8 +39,9 @@ import (
 const (
 	PARGrantSubroutineName = "PARGrantSubroutine"
 
-	// Mirror-Secret key carrying the full pma1.<...> wire string in the
-	// Provider Workspace.
+	// TODO: rename "Mirror-Secret" terminology.
+	// Mirror-Secret key carrying the pma1.<tokenID>.<secret> access
+	// token in the Provider Workspace.
 	parAccessTokenSecretKey = "accessToken"
 )
 
@@ -139,7 +140,7 @@ func (r *PARGrantSubroutine) Process(ctx context.Context, obj ctrlruntimeclient.
 		par.Status.Phase = pmprovidersv1alpha1.ProviderAccessRequestPhaseFailed
 		setPARReadyCondition(par, metav1.ConditionFalse,
 			pmprovidersv1alpha1.ProviderAccessRequestReasonInvalidAccessToken,
-			"access token does not parse as a pma1.<...> wire string")
+			"access token does not parse as a pma1.<tokenID>.<secret>")
 		return subroutines.OK(), nil
 	}
 

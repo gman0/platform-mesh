@@ -76,8 +76,7 @@ type AccessStatus struct {
 // Access is the ongoing binding to one PM instance workspace, created by
 // the access SDK on a successful /access handshake against an
 // AccessIdentity. It references the delivered kubeconfig Secret, which
-// the access SDK then owns and maintains (SA token renewal via
-// TokenRequest, CA bundle rotation via the well-known object).
+// the access SDK then owns and maintains.
 type Access struct {
 	metav1.TypeMeta `json:",inline"`
 

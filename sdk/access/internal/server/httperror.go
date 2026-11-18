@@ -20,7 +20,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/go-logr/logr"
+	"go.platform-mesh.io/golang-commons/logger"
 )
 
 // Public response body strings. These are the only error messages the
@@ -56,15 +56,26 @@ func httpErr(code int, public string, err error) *httpError {
 	return &httpError{code: code, public: public, err: err}
 }
 
-func writeError(w http.ResponseWriter, log logr.Logger, err error) {
+func writeError(w http.ResponseWriter, log *logger.Logger, err error) {
 	var httpErr *httpError
 	if errors.As(err, &httpErr) {
 		if httpErr.err != nil {
-			log.V(1).Info("handler rejected request", "code", httpErr.code, "public", httpErr.public, "err", httpErr.err.Error())
+			log.Debug().
+				Int("code", httpErr.code).
+				Str("public", httpErr.public).
+				Err(httpErr.err).
+				Msg("handler rejected request")
 		}
 		http.Error(w, httpErr.public, httpErr.code)
 		return
 	}
-	log.Error(err, "handler returned uncategorised error")
+	log.Error().Err(err).Msg("handler returned uncategorised error")
 	http.Error(w, publicInternalError, http.StatusInternalServerError)
+}
+
+// logFromRequest returns the request-scoped logger populated by the
+// shared middleware chain, falling back to the stdlib logger if the
+// middleware is absent (e.g. in unit tests calling the handler directly).
+func logFromRequest(r *http.Request) *logger.Logger {
+	return logger.LoadLoggerFromContext(r.Context())
 }

@@ -25,8 +25,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/go-logr/logr"
-
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 	pmaccessv1 "go.platform-mesh.io/protocol/access/v1"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
@@ -97,7 +95,6 @@ func newHandler(t *testing.T, ti testIdentity) *Handler {
 		Client:      cl,
 		Scheme:      sch,
 		ReplayCache: pmaccessproto.NewReplayCache(0),
-		Log:         logr.Discard(),
 	}
 }
 

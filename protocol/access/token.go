@@ -22,8 +22,8 @@ import (
 	"strings"
 )
 
-// TokenPrefix is the wire-format version prefix. Clients split the access
-// token on '.' and verify this is the first segment.
+// TokenPrefix is the version prefix carried as the first segment of
+// every access token. Clients split on '.' and verify this value.
 const TokenPrefix = "pma1"
 
 // ErrInvalidToken is returned by ParseToken for any malformed access
@@ -44,8 +44,8 @@ type Token struct {
 	Secret []byte
 }
 
-// ParseToken parses a pma1.<tokenID>.<secret> wire string. Returns
-// ErrInvalidToken on any shape error.
+// ParseToken parses an access token in the pma1.<tokenID>.<secret>
+// form. Returns ErrInvalidToken on any shape error.
 func ParseToken(s string) (Token, error) {
 	parts := strings.Split(s, ".")
 	if len(parts) != 3 {
@@ -69,8 +69,9 @@ func ParseToken(s string) (Token, error) {
 	}, nil
 }
 
-// String serializes a Token to its wire form. Secret is base64url-encoded
-// without padding; TokenID is inlined as-is.
+// String serializes a Token to the pma1.<tokenID>.<secret> access-token
+// form. Secret is base64url-encoded without padding; TokenID is inlined
+// as-is.
 func (t Token) String() string {
 	return strings.Join([]string{
 		TokenPrefix,
