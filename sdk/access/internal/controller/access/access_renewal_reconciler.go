@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"go.platform-mesh.io/golang-commons/logger"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
 
 	authv1 "k8s.io/api/authentication/v1"
@@ -39,11 +40,20 @@ import (
 )
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := logger.LoadLoggerFromContext(ctx).ChildLogger("controller", "Access").
+		ChildLogger("name", req.Name).ChildLogger("namespace", req.Namespace)
+
 	access := &accessv1alpha1.Access{}
 	if err := r.Client.Get(ctx, req.NamespacedName, access); err != nil {
 		return ctrl.Result{}, ctrlruntimeclient.IgnoreNotFound(err)
 	}
 	if access.DeletionTimestamp != nil {
+		return ctrl.Result{}, nil
+	}
+	if access.Status.Phase == accessv1alpha1.AccessPhaseRevoked {
+		// Terminal state: the token is no longer renewable. Deletion
+		// of the Access CR is a user action and a follow-up for the
+		// SDK.
 		return ctrl.Result{}, nil
 	}
 	if access.Spec.KubeconfigSecretRef == nil {
@@ -56,6 +66,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		if apierrors.IsNotFound(err) {
 			// The handshake creates the Secret right after the Access;
 			// requeue briefly if we observe the Access first.
+			log.Info().Str("secret", secretKey.Name).Msg("kubeconfig Secret not present yet, requeuing")
 			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("get kubeconfig Secret %q: %w", secretKey.Name, err)
@@ -74,16 +85,36 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("parse current SA token: %w", err)
 	}
 
+	// If the token's exp is in the past, it is no longer renewable
+	// against kcp. Mark the Access Revoked and stop reconciling.
+	if !exp.IsZero() && !time.Now().Before(exp) {
+		log.Info().Time("exp", exp).Msg("SA token expired, marking Access Revoked")
+		access.Status.Phase = accessv1alpha1.AccessPhaseRevoked
+		if err := r.Client.Status().Update(ctx, access); err != nil {
+			return ctrl.Result{}, fmt.Errorf("mark Access Revoked: %w", err)
+		}
+		return ctrl.Result{}, nil
+	}
+
 	// If the token has a real exp and plenty of life remains, come back later.
 	if !exp.IsZero() {
 		threshold := time.Duration(float64(r.ttl()) * r.renewalThresholdFraction())
 		if remaining := time.Until(exp); remaining > threshold {
+			log.Debug().Time("exp", exp).Dur("remaining", remaining).Dur("requeueAfter", remaining-threshold).
+				Msg("SA token still fresh, requeuing")
 			return ctrl.Result{RequeueAfter: remaining - threshold}, nil
 		}
 	}
 
+	if exp.IsZero() {
+		log.Info().Str("sa", saNamespace+"/"+saName).Msg("SA token has no exp, renewing via TokenRequest")
+	} else {
+		log.Info().Str("sa", saNamespace+"/"+saName).Time("exp", exp).Msg("SA token near expiry, renewing")
+	}
+
 	newToken, newExp, err := r.mintSAToken(ctx, kubeconfig, saNamespace, saName)
 	if err != nil {
+		log.Error().Err(err).Str("sa", saNamespace+"/"+saName).Msg("TokenRequest failed")
 		return ctrl.Result{}, fmt.Errorf("mint SA token: %w", err)
 	}
 
@@ -98,6 +129,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	threshold := time.Duration(float64(r.ttl()) * r.renewalThresholdFraction())
+	log.Info().Str("sa", saNamespace+"/"+saName).Time("newExp", newExp).Msg("SA token renewed")
 	return ctrl.Result{RequeueAfter: time.Until(newExp) - threshold}, nil
 }
 

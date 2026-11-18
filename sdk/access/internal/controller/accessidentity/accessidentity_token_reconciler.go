@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"strings"
 
+	"go.platform-mesh.io/golang-commons/logger"
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
 
@@ -41,6 +42,9 @@ func accessTokenSecretName(identity *accessv1alpha1.AccessIdentity) string {
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := logger.LoadLoggerFromContext(ctx).ChildLogger("controller", "AccessIdentity").
+		ChildLogger("name", req.Name).ChildLogger("namespace", req.Namespace)
+
 	identity := &accessv1alpha1.AccessIdentity{}
 	if err := r.Client.Get(ctx, req.NamespacedName, identity); err != nil {
 		return ctrl.Result{}, ctrlruntimeclient.IgnoreNotFound(err)
@@ -54,13 +58,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	case apierrors.IsNotFound(err):
 		// Secret is missing: either this is a new AccessIdentity or it was deleted
 		// (i.e. user wants rotation). We create it now.
+		log.Info().Str("secret", secretName).Msg("Secret missing, minting access token")
 		tokenID, err := r.mint(ctx, identity, secretName)
 		if err != nil {
+			log.Error().Err(err).Str("secret", secretName).Msg("mint failed")
 			return ctrl.Result{}, err
 		}
 		identity.Status.TokenID = tokenID
 		setAccessIdentityReady(identity, metav1.ConditionTrue, accessv1alpha1.AccessIdentityReadyReason,
 			"access token is ready")
+		log.Info().Str("tokenID", tokenID).Msg("access token minted")
 		return ctrl.Result{}, r.Client.Status().Update(ctx, identity)
 
 	case err != nil:
@@ -70,10 +77,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Secret exists. Ensure status.TokenID matches the ID on the Secret.
 	tokenID, err := tokenIDFromSecret(secret)
 	if err != nil {
+		log.Info().Err(err).Str("secret", secretName).Msg("Secret present but not usable")
 		setAccessIdentityReady(identity, metav1.ConditionFalse, accessv1alpha1.AccessIdentityNotReadyAwaitingSecretReason, err.Error())
 		return ctrl.Result{}, r.Client.Status().Update(ctx, identity)
 	}
 	if identity.Status.TokenID != tokenID {
+		log.Info().Str("tokenID", tokenID).Msg("status.tokenID reconciled from Secret")
 		identity.Status.TokenID = tokenID
 		setAccessIdentityReady(identity, metav1.ConditionTrue, accessv1alpha1.AccessIdentityReadyReason,
 			"access token is ready")

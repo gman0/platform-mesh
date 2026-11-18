@@ -26,6 +26,13 @@ const (
 	// AccessPhaseActive means the delivered kubeconfig is being
 	// maintained (SA token renewal, CA bundle rotation).
 	AccessPhaseActive = "Active"
+
+	// AccessPhaseRevoked means the current SA token has expired and
+	// cannot be renewed (PM-side revocation, workspace deletion, etc.).
+	// Reconcilers stop acting on Revoked Accesses — the kubeconfig
+	// Secret is not updated and no further renewal is attempted.
+	// Revoked is a terminal state in v1alpha1.
+	AccessPhaseRevoked = "Revoked"
 )
 
 // AccessSpec defines the desired state of an Access.

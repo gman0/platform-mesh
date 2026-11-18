@@ -32,8 +32,7 @@ import (
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// Defaults for the token-renewal reconciler. Flags can be added later
-// if any deployment needs to tune these.
+// Defaults for the token-renewal reconciler.
 const (
 	// DefaultAccessTokenTTL is the lifetime requested from kcp's
 	// TokenRequest API for each renewed ServiceAccount token.
@@ -41,8 +40,8 @@ const (
 
 	// DefaultRenewalThresholdFraction is the fraction of the current
 	// token's remaining lifetime below which the reconciler renews.
-	// With 0.2, the reconciler renews when less than 20% of the TTL is
-	// left — matching the kubelet convention.
+	// With 0.2, the reconciler renews when less than 20% of the TTL
+	// is left.
 	DefaultRenewalThresholdFraction = 0.2
 )
 

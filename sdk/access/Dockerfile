@@ -26,12 +26,12 @@ ARG TARGETARCH
 
 WORKDIR /workspace
 
-# Go workspace + the modules this image needs.
-COPY go.work go.work
-COPY go.work.sum go.work.sum
-COPY apis/ apis/
-COPY protocol/ protocol/
-COPY sdk/ sdk/
+# Stage 1: copy only the files that determine which modules get downloaded.
+# This keeps the `go mod download` layer cached across source-only edits.
+COPY go.work go.work.sum ./
+COPY apis/go.mod apis/go.sum apis/
+COPY protocol/go.mod protocol/go.sum protocol/
+COPY sdk/go.mod sdk/go.sum sdk/
 
 # Drop every workspace module except the ones copied above, so the workspace
 # resolves with only the modules copied above — regardless of what else
@@ -46,9 +46,24 @@ RUN for m in $(go work edit -json | sed -n 's/.*"DiskPath": "\(.*\)".*/\1/p'); d
 
 WORKDIR /workspace/sdk
 
-RUN go mod download
+# Prime the module cache. The BuildKit cache mount persists downloaded
+# modules across builds, so even when go.mod or go.sum changes, previously
+# fetched modules are reused.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+# Stage 2: copy the sources. This layer invalidates on source edits but
+# does not re-run `go mod download`.
+WORKDIR /workspace
+COPY apis/ apis/
+COPY protocol/ protocol/
+COPY sdk/ sdk/
+
+WORKDIR /workspace/sdk
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
     go build -ldflags '-w -s' -o /workspace/platform-mesh-access-server ./access/cmd/access-server && \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
     go build -ldflags '-w -s' -o /workspace/platform-mesh-access-controller ./access/cmd/access-controller

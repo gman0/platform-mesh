@@ -21,10 +21,12 @@ limitations under the License.
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/pflag"
 
+	"go.platform-mesh.io/golang-commons/logger"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
 	accessctrl "go.platform-mesh.io/sdk/access/internal/controller/access"
 	identityctrl "go.platform-mesh.io/sdk/access/internal/controller/accessidentity"
@@ -34,7 +36,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
@@ -43,14 +44,27 @@ func main() {
 		metricsAddr string
 		probeAddr   string
 		leaderElect bool
+		logLevel    string
+		logNoJSON   bool
 	)
 
 	pflag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Metrics listen address.")
 	pflag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "Health probe listen address.")
 	pflag.BoolVar(&leaderElect, "leader-elect", true, "Enable leader election.")
+	pflag.StringVar(&logLevel, "log-level", "info", "Set the log level")
+	pflag.BoolVar(&logNoJSON, "no-json", false, "Disable JSON logging")
 	pflag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
+	logcfg := logger.DefaultConfig()
+	logcfg.Name = "access-controller"
+	logcfg.Level = logLevel
+	logcfg.NoJSON = logNoJSON
+	log, err := logger.New(logcfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "unable to build logger: %v\n", err)
+		os.Exit(1)
+	}
+	ctrl.SetLogger(log.Logr())
 	setupLog := ctrl.Log.WithName("setup")
 
 	scheme := runtime.NewScheme()
@@ -98,7 +112,8 @@ func main() {
 	}
 
 	setupLog.Info("starting access controller")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	ctx := logger.SetLoggerInContext(ctrl.SetupSignalHandler(), log)
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "manager stopped with error")
 		os.Exit(1)
 	}
