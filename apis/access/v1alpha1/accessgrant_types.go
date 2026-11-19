@@ -23,71 +23,50 @@ import (
 
 // Condition types on AccessGrant.
 const (
-	// AccessGrantConditionAccepted indicates whether access-operator was
-	// able to parse the AccessGrant's spec and resolve the required
-	// local state (mirror access-token Secret, operator config) well
-	// enough to attempt a /access dial.
-	AccessGrantConditionAccepted = "Accepted"
+	// AccessGrantConditionValid indicates whether local state is valid.
+	AccessGrantConditionValid = "Valid"
 
-	// AccessGrantConditionConnected indicates the current state of the
-	// connection to the user-side access SDK as observed by the most
-	// recent /access dial.
-	AccessGrantConditionConnected = "Connected"
+	// AccessGrantConditionHandshakeCompleted indicates the state
+	// of the handshake towards the remote side.
+	AccessGrantConditionHandshakeCompleted = "HandshakeCompleted"
 )
 
 // Reasons for the Accepted condition.
 const (
-	// AccessGrantReasonAccepted is set when the spec validated and the
+	// AccessGrantAcceptedReason is set when the spec validated and the
 	// mirror Secret and operator config resolved; the operator will
 	// attempt the /access dial.
-	AccessGrantReasonAccepted = "Accepted"
+	AccessGrantAcceptedReason = "Accepted"
 
-	// AccessGrantReasonAccessTokenSecretMissing is set when the Secret
+	// AccessGrantAccessTokenSecretMissingReason is set when the Secret
 	// named by spec.accessTokenSecretRef is missing or lacks the
 	// expected key.
-	AccessGrantReasonAccessTokenSecretMissing = "AccessTokenSecretMissing"
+	AccessGrantAccessTokenSecretMissingReason = "AccessTokenSecretMissing"
 
-	// AccessGrantReasonInvalidAccessToken is set when the Secret's
-	// token value does not parse as a pma1 access token.
-	AccessGrantReasonInvalidAccessToken = "InvalidAccessToken"
-
-	// AccessGrantReasonMissingKcpURL is set when the operator has no
-	// --kcp-external-url configured and therefore cannot populate the
-	// handshake body.
-	AccessGrantReasonMissingKcpURL = "MissingKcpURL"
+	// AccessGrantInvalidAccessTokenReason is set when the Secret's
+	// token value does not parse as a valid access token.
+	AccessGrantInvalidAccessTokenReason = "InvalidAccessToken"
 )
 
-// Reasons for the Connected condition.
+// Reasons for the HandshakeCompleted condition.
 const (
-	// AccessGrantReasonHandshakeSucceeded is set on the Connected
+	// AccessGrantHandshakeSucceededReason is set on the Connected
 	// condition after a successful /access 200.
-	AccessGrantReasonHandshakeSucceeded = "HandshakeSucceeded"
+	AccessGrantHandshakeSucceededReason = "HandshakeSucceeded"
 
-	// AccessGrantReasonHandshakePending is set while the user-side
-	// access SDK has queued the handshake for manual approval (/access
-	// returned 202).
-	AccessGrantReasonHandshakePending = "HandshakePending"
-
-	// AccessGrantReasonHandshakeRejected is set when the user-side
-	// access SDK rejected the handshake (/access returned 403).
-	AccessGrantReasonHandshakeRejected = "HandshakeRejected"
-
-	// AccessGrantReasonAccessURLUnreachable is set when access-operator
+	// AccessGrantAccessURLUnreachableReason is set when access-operator
 	// cannot dial the access SDK (TLS, DNS, network) or /access
 	// returned an unexpected status.
-	AccessGrantReasonAccessURLUnreachable = "AccessURLUnreachable"
+	AccessGrantAccessURLUnreachableReason = "AccessURLUnreachable"
 
-	// AccessGrantReasonSATokenPending indicates the k8s SA-token
-	// controller has not yet populated the SA-token Secret
-	// access-operator created in the Provider Workspace.
-	AccessGrantReasonSATokenPending = "SATokenPending"
+	// AccessGrantSATokenPendingReason indicates the k8s SA-token
+	// controller has not yet populated the SA-token Secret.
+	AccessGrantSATokenPendingReason = "SATokenPending"
 
-	// AccessGrantReasonUnsupportedProtocolVersion is set when the
+	// AccessGrantUnsupportedProtocolVersionReason is set when the
 	// /versions probe returned a list of handshake versions that
 	// share no overlap with the versions this operator supports.
-	// The condition message carries both lists so the user can
-	// decide whether to upgrade the operator or the provider SDK.
-	AccessGrantReasonUnsupportedProtocolVersion = "UnsupportedProtocolVersion"
+	AccessGrantUnsupportedProtocolVersionReason = "UnsupportedProtocolVersion"
 )
 
 // AccessTokenSecretRef references a Secret in the same namespace as the
@@ -104,36 +83,25 @@ type AccessTokenSecretRef struct {
 	Key string `json:"key,omitempty"`
 }
 
-// AccessGrantSpec defines the desired state of AccessGrant. AccessGrant
-// lives in the Provider Workspace on the PM cluster; it is created by the
-// provider reconciler on a successful ProviderAccessRequest and consumed
-// by access-operator to drive the /access handshake.
 type AccessGrantSpec struct {
 	// saRef references the ServiceAccount, in the same namespace as this
-	// AccessGrant, that access-operator ensures an SA-token Secret for
-	// and reads the bearer token from. The token is delivered to the
-	// user-side cluster in the /access request body.
+	// AccessGrant. The JWT token for this ServiceAccount is delivered to
+	// the user-side cluster in the /access request body.
 	// +required
 	SARef corev1.LocalObjectReference `json:"saRef"`
 
-	// accessURL is the user-side access SDK's /access endpoint, extracted
-	// from the access token's wire form by the provider reconciler.
+	// accessURL is the user-side access SDK's /access endpoint.
 	// +required
 	AccessURL string `json:"accessURL"`
 
 	// accessTokenSecretRef references a Secret in the same namespace as
 	// the AccessGrant containing the full pma1.<...> access token string.
-	// The Secret is created by the provider reconciler, propagating the
-	// token from the ProviderAccessRequest's Secret. access-operator
-	// derives the per-dial HMAC call credential from the token value.
-	// A fresh PAR overwrites the Secret contents to drive re-onboarding.
 	// +required
 	AccessTokenSecretRef AccessTokenSecretRef `json:"accessTokenSecretRef"`
 
 	// caBundle is an optional PEM-encoded CA bundle used to verify the
-	// access SDK's /access TLS server certificate. Propagated from
-	// Provider.spec.remote.caBundle. When empty, access-operator uses
-	// system CAs.
+	// access SDK's /access TLS server certificate. When empty, system
+	// CAs are used.
 	// +optional
 	CABundle string `json:"caBundle,omitempty"`
 }
