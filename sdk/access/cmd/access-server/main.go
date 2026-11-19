@@ -38,7 +38,7 @@ import (
 	pmmws "go.platform-mesh.io/golang-commons/middleware"
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
-	accessserver "go.platform-mesh.io/sdk/access/internal/server"
+	accessserver "go.platform-mesh.io/sdk/access/pkg/server"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"

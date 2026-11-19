@@ -28,8 +28,8 @@ import (
 
 	"go.platform-mesh.io/golang-commons/logger"
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
-	accessctrl "go.platform-mesh.io/sdk/access/internal/controller/access"
-	identityctrl "go.platform-mesh.io/sdk/access/internal/controller/accessidentity"
+	accessctrl "go.platform-mesh.io/sdk/access/pkg/controller/access"
+	identityctrl "go.platform-mesh.io/sdk/access/pkg/controller/accessidentity"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
