@@ -74,6 +74,7 @@ func TestAccess(t *testing.T) {
 	e := setup(t)
 
 	t.Run("AccessIdentityMintsSecret", func(t *testing.T) { testAccessIdentityMintsSecret(t, e) })
+	t.Run("AccessIdentityRotatesOnSecretDeletion", func(t *testing.T) { testAccessIdentityRotatesOnSecretDeletion(t, e) })
 }
 
 // setup creates a kcp workspace, installs the AccessIdentity CRD, starts
@@ -185,4 +186,61 @@ func testAccessIdentityMintsSecret(t *testing.T, e *env) {
 	cond := apimeta.FindStatusCondition(updated.Status.Conditions, accessv1alpha1.AccessIdentityReady)
 	require.NotNil(t, cond)
 	assert.Equal(t, accessv1alpha1.AccessIdentityReadyReason, cond.Reason)
+}
+
+// testAccessIdentityRotatesOnSecretDeletion: deleting the access-token
+// Secret is how rotation is triggered. The next reconcile mints a fresh
+// (tokenID, HMAC) pair and status.tokenID follows.
+func testAccessIdentityRotatesOnSecretDeletion(t *testing.T, e *env) {
+	ctx := t.Context()
+	name := "test-identity-rotate"
+	identity := &accessv1alpha1.AccessIdentity{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+	}
+	require.NoError(t, e.cl.Create(ctx, identity))
+
+	secretKey := types.NamespacedName{Name: name + "-access-token", Namespace: testNamespace}
+
+	var firstTokenID string
+	var firstToken []byte
+	wait.Until(t, func() bool {
+		secret := &corev1.Secret{}
+		if err := e.cl.Get(ctx, secretKey, secret); err != nil {
+			return false
+		}
+		firstTokenID = secret.Labels[accessv1alpha1.TokenIDLabelKey]
+		firstToken = secret.Data[accessv1alpha1.AccessTokenSecretKey]
+		return firstTokenID != "" && len(firstToken) > 0
+	}, defaultTestTimeout, defaultTickInterval, "initial access-token Secret should be minted")
+
+	// Delete the Secret to request rotation. The owner reference to the
+	// AccessIdentity would garbage-collect it on identity deletion;
+	// deleting it directly here does not touch the identity.
+	toDelete := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretKey.Name, Namespace: secretKey.Namespace}}
+	require.NoError(t, e.cl.Delete(ctx, toDelete))
+
+	// A fresh Secret appears with a different tokenID and a different token.
+	var secondTokenID string
+	wait.Until(t, func() bool {
+		secret := &corev1.Secret{}
+		if err := e.cl.Get(ctx, secretKey, secret); err != nil {
+			return false
+		}
+		secondTokenID = secret.Labels[accessv1alpha1.TokenIDLabelKey]
+		if secondTokenID == "" || secondTokenID == firstTokenID {
+			return false
+		}
+		newToken := secret.Data[accessv1alpha1.AccessTokenSecretKey]
+		return len(newToken) > 0 && string(newToken) != string(firstToken)
+	}, defaultTestTimeout, defaultTickInterval, "rotated access-token Secret should have a new tokenID")
+
+	// Status catches up to the new tokenID and stays Ready.
+	wait.Until(t, func() bool {
+		cur := &accessv1alpha1.AccessIdentity{}
+		if err := e.cl.Get(ctx, ctrlruntimeclient.ObjectKey{Name: name, Namespace: testNamespace}, cur); err != nil {
+			return false
+		}
+		return cur.Status.TokenID == secondTokenID &&
+			apimeta.IsStatusConditionTrue(cur.Status.Conditions, accessv1alpha1.AccessIdentityReady)
+	}, defaultTestTimeout, defaultTickInterval, "AccessIdentity status should track the rotated tokenID")
 }
