@@ -70,6 +70,14 @@ components:
     path: sdk
     library: true
 
+  # --- images shared across charts ------------------------------------------
+  # The platform-mesh-sdk-access image hosts both the AccessIdentity controller
+  # and the /access HTTP server; it is deployed by the two
+  # platform-mesh-sdk-access-{controller,server} charts.
+  platform-mesh-sdk-access:
+    path: sdk/access
+    image: platform-mesh-sdk-access
+
   # --- operators -------------------------------------------------------------
   access-operator:
     path: operators/access-operator

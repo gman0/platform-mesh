@@ -10,7 +10,7 @@ image:
   # -- Image registry.
   registry: ghcr.io
   # -- Image repository (without registry).
-  repository: platform-mesh/platform-mesh/platform-mesh-access
+  repository: platform-mesh/platform-mesh/platform-mesh-sdk-access
   # -- Image digest (when set, overrides tag: registry/repository@digest).
   digest: ""
 

@@ -1,6 +1,6 @@
 # platform-mesh-sdk-access-crds
 
-A Helm chart for Kubernetes
+A Helm chart to deploy access SDK CRDs on a user-side cluster.
 
 ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
 ## Values

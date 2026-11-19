@@ -1,13 +1,13 @@
 # platform-mesh-sdk-access-server
 
-A Helm chart to deploy the Platform Mesh access SDK /access HTTP server on a user-side cluster.
+A Helm chart to deploy the Platform Mesh access SDK HTTP server on a user-side cluster.
 
 ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square)
 ## Values
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | accessPort | int | `8443` | Port the /access listener binds to inside the Pod. Exposed externally via the Service below. |
-| crds.enabled | bool | `true` |  |
+| crds.enabled | bool | `false` |  |
 | deployment.replicas | int | `1` |  |
 | deployment.specTemplate.annotations | object | `{}` |  |
 | deployment.specTemplate.labels | object | `{}` |  |
@@ -19,7 +19,7 @@ A Helm chart to deploy the Platform Mesh access SDK /access HTTP server on a use
 | httpRoute.referenceGrant | object | `{"enabled":false,"fromNamespace":""}` | Optional ReferenceGrant permitting HTTPRoutes from another namespace to backendRef this chart's Service. Only needed when the HTTPRoute is created in a different namespace than this release. |
 | image.digest | string | `""` | Image digest (when set, overrides tag: registry/repository@digest). |
 | image.registry | string | `"ghcr.io"` | Image registry. |
-| image.repository | string | `"platform-mesh/platform-mesh/platform-mesh-access"` | Image repository (without registry). |
+| image.repository | string | `"platform-mesh/platform-mesh/platform-mesh-sdk-access"` | Image repository (without registry). |
 | ingress | object | `{"annotations":{},"className":"","enabled":false,"hosts":[],"tls":[]}` | Optional classic Ingress exposing /access, for clusters without Gateway API. The Ingress and the Service must live in the same namespace. |
 | pathPrefix | string | `""` | Optional URL path prefix under which /versions and /vN/access are mounted. Leave empty for root. Use when fronting the server with an ingress that preserves a prefix on the request path (e.g. "/platform-mesh" to serve at https://host/platform-mesh/{versions,v1/access}). |
 | security.mountServiceAccountToken | bool | `true` |  |
@@ -53,7 +53,7 @@ Example
 
 ![Version: 0.0.0](https://img.shields.io/badge/Version-0.0.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.0.0](https://img.shields.io/badge/AppVersion-0.0.0-informational?style=flat-square)
 
-A Helm chart to deploy the Platform Mesh access SDK /access HTTP server on a user-side cluster.
+A Helm chart to deploy the Platform Mesh access SDK HTTP server on a user-side cluster.
 
 ## Requirements
 
@@ -67,7 +67,7 @@ A Helm chart to deploy the Platform Mesh access SDK /access HTTP server on a use
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | accessPort | int | `8443` | Port the /access listener binds to inside the Pod. Exposed externally via the Service below. |
-| crds.enabled | bool | `true` |  |
+| crds.enabled | bool | `false` |  |
 | deployment.replicas | int | `1` |  |
 | deployment.specTemplate.annotations | object | `{}` |  |
 | deployment.specTemplate.labels | object | `{}` |  |
@@ -79,7 +79,7 @@ A Helm chart to deploy the Platform Mesh access SDK /access HTTP server on a use
 | httpRoute.referenceGrant | object | `{"enabled":false,"fromNamespace":""}` | Optional ReferenceGrant permitting HTTPRoutes from another namespace to backendRef this chart's Service. Only needed when the HTTPRoute is created in a different namespace than this release. |
 | image.digest | string | `""` | Image digest (when set, overrides tag: registry/repository@digest). |
 | image.registry | string | `"ghcr.io"` | Image registry. |
-| image.repository | string | `"platform-mesh/platform-mesh/platform-mesh-access"` | Image repository (without registry). |
+| image.repository | string | `"platform-mesh/platform-mesh/platform-mesh-sdk-access"` | Image repository (without registry). |
 | ingress | object | `{"annotations":{},"className":"","enabled":false,"hosts":[],"tls":[]}` | Optional classic Ingress exposing /access, for clusters without Gateway API. The Ingress and the Service must live in the same namespace. |
 | pathPrefix | string | `""` | Optional URL path prefix under which /versions and /vN/access are mounted. Leave empty for root. Use when fronting the server with an ingress that preserves a prefix on the request path (e.g. "/platform-mesh" to serve at https://host/platform-mesh/{versions,v1/access}). |
 | security.mountServiceAccountToken | bool | `true` |  |

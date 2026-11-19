@@ -6,13 +6,13 @@ A Helm chart to deploy the Platform Mesh access SDK AccessIdentity controller on
 ## Values
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| crds.enabled | bool | `true` |  |
+| crds.enabled | bool | `false` |  |
 | deployment.replicas | int | `1` |  |
 | deployment.specTemplate.annotations | object | `{}` |  |
 | deployment.specTemplate.labels | object | `{}` |  |
 | image.digest | string | `""` | Image digest (when set, overrides tag: registry/repository@digest). |
 | image.registry | string | `"ghcr.io"` | Image registry. |
-| image.repository | string | `"platform-mesh/platform-mesh/platform-mesh-access"` | Image repository (without registry). |
+| image.repository | string | `"platform-mesh/platform-mesh/platform-mesh-sdk-access"` | Image repository (without registry). |
 | operator.leaderElect | bool | `true` | Enable leader election so only one replica mints tokens at a time. Keep on in production; safe to leave on with replicas=1. |
 | security.mountServiceAccountToken | bool | `true` |  |
 
@@ -51,13 +51,13 @@ A Helm chart to deploy the Platform Mesh access SDK AccessIdentity controller on
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| crds.enabled | bool | `true` |  |
+| crds.enabled | bool | `false` |  |
 | deployment.replicas | int | `1` |  |
 | deployment.specTemplate.annotations | object | `{}` |  |
 | deployment.specTemplate.labels | object | `{}` |  |
 | image.digest | string | `""` | Image digest (when set, overrides tag: registry/repository@digest). |
 | image.registry | string | `"ghcr.io"` | Image registry. |
-| image.repository | string | `"platform-mesh/platform-mesh/platform-mesh-access"` | Image repository (without registry). |
+| image.repository | string | `"platform-mesh/platform-mesh/platform-mesh-sdk-access"` | Image repository (without registry). |
 | operator.leaderElect | bool | `true` | Enable leader election so only one replica mints tokens at a time. Keep on in production; safe to leave on with replicas=1. |
 | security.mountServiceAccountToken | bool | `true` |  |
 
