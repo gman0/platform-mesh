@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	accessv1alpha1 "go.platform-mesh.io/sdk/access/apis/v1alpha1"
+	accessctrl "go.platform-mesh.io/sdk/access/pkg/controller/access"
 	identityctrl "go.platform-mesh.io/sdk/access/pkg/controller/accessidentity"
 	"go.platform-mesh.io/platform-mesh/tests/framework/fixtures"
 	"go.platform-mesh.io/platform-mesh/tests/framework/kcp"
@@ -33,10 +34,12 @@ import (
 	"go.platform-mesh.io/platform-mesh/tests/framework/wait"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -59,15 +62,21 @@ const (
 	// testNamespace is where AccessIdentity + its Secret live.
 	testNamespace = "default"
 
-	crdName = "accessidentities.access-sdk.platform-mesh.io"
+	accessIdentityCRDName = "accessidentities.access-sdk.platform-mesh.io"
+	accessCRDName         = "accesses.access-sdk.platform-mesh.io"
 )
 
 //go:embed testdata/accessidentity-crd.yaml
 var accessIdentityCRD []byte
 
-// env is what the subtests share: a client into the test workspace.
+//go:embed testdata/access-crd.yaml
+var accessCRD []byte
+
+// env is what the subtests share: a client into the test workspace and
+// the admin REST config used to bootstrap SA tokens.
 type env struct {
-	cl ctrlruntimeclient.Client
+	cl       ctrlruntimeclient.Client
+	adminCfg *rest.Config
 }
 
 func TestAccess(t *testing.T) {
@@ -75,6 +84,9 @@ func TestAccess(t *testing.T) {
 
 	t.Run("AccessIdentityMintsSecret", func(t *testing.T) { testAccessIdentityMintsSecret(t, e) })
 	t.Run("AccessIdentityRotatesOnSecretDeletion", func(t *testing.T) { testAccessIdentityRotatesOnSecretDeletion(t, e) })
+	t.Run("AccessRevokesExpiredToken", func(t *testing.T) { testAccessRevokesExpiredToken(t, e) })
+	t.Run("AccessRenewsExpiringToken", func(t *testing.T) { testAccessRenewsExpiringToken(t, e) })
+	t.Run("HandlerDeliversKubeconfig", func(t *testing.T) { testHandlerDeliversKubeconfig(t, e) })
 }
 
 // setup creates a kcp workspace, installs the AccessIdentity CRD, starts
@@ -87,7 +99,7 @@ func setup(t *testing.T) *env {
 	kcpEnv, err := kcp.Default(t.Context())
 	require.NoError(t, err)
 
-	s := scheme.New(t, accessv1alpha1.AddToScheme)
+	s := scheme.New(t, accessv1alpha1.AddToScheme, rbacv1.AddToScheme)
 
 	wsPath := core.RootCluster.Path().Join(workspaceName)
 	_, err = kcpEnv.CreateWorkspace(t.Context(), wsPath.String(), kcptc.WaitForReachable())
@@ -99,19 +111,23 @@ func setup(t *testing.T) *env {
 	for _, obj := range fixtures.Decode(t, accessIdentityCRD) {
 		fixtures.Apply(t, cl, obj)
 	}
-	wait.CRDEstablished(t, cl, crdName)
+	for _, obj := range fixtures.Decode(t, accessCRD) {
+		fixtures.Apply(t, cl, obj)
+	}
+	wait.CRDEstablished(t, cl, accessIdentityCRDName)
+	wait.CRDEstablished(t, cl, accessCRDName)
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testNamespace}}
 	fixtures.Apply(t, cl, ns)
 
-	startIdentityController(t, kcpEnv, wsPath.String(), s)
+	startControllers(t, kcpEnv, wsPath.String(), s)
 
-	return &env{cl: cl}
+	return &env{cl: cl, adminCfg: kcpEnv.RESTConfig(wsPath.String())}
 }
 
-// startIdentityController runs the AccessIdentity reconciler against
-// the workspace at path, the way cmd/access-controller does.
-func startIdentityController(t *testing.T, kcpEnv *kcptc.Instance, path string, s *runtime.Scheme) {
+// startControllers runs the AccessIdentity and Access reconcilers
+// against the workspace at path, the way cmd/access-controller does.
+func startControllers(t *testing.T, kcpEnv *kcptc.Instance, path string, s *runtime.Scheme) {
 	t.Helper()
 	mgr, err := ctrl.NewManager(kcpEnv.RESTConfig(path), ctrl.Options{
 		Scheme:         s,
@@ -122,6 +138,11 @@ func startIdentityController(t *testing.T, kcpEnv *kcptc.Instance, path string, 
 	require.NoError(t, err)
 
 	require.NoError(t, (&identityctrl.Reconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr))
+
+	require.NoError(t, (&accessctrl.Reconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr))
