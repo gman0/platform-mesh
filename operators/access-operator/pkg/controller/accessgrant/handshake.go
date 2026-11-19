@@ -35,25 +35,17 @@ import (
 	pmaccessproto "go.platform-mesh.io/protocol/access"
 )
 
-// SATokenMinter returns a bearer token for the named ServiceAccount.
-// A non-nil nil-error empty string means the token is not yet
-// available and the caller should requeue; non-empty string means
-// success.
-//
-// Extracted as a function type so tests can stub it.
-type SATokenMinter func(ctx context.Context, cl ctrlruntimeclient.Client, saName, saNamespace string) (string, error)
-
 // saTokenSecretName derives the Secret name access-operator uses to
 // hold an SA-token Secret for the named ServiceAccount.
 func saTokenSecretName(saName string) string {
 	return saName + "-access-operator-token"
 }
 
-// defaultSATokenMinter is the production SATokenMinter. It ensures a
-// kubernetes.io/service-account-token Secret exists for the SA in the
-// Provider Workspace and returns its populated token. If the token
-// field is not yet populated by the k8s SA-token controller it
-// returns ("", nil) so the caller can requeue instead of blocking.
+// defaultSATokenMinter ensures a kubernetes.io/service-account-token
+// Secret exists for the SA in the Provider Workspace and returns its
+// populated token. If the token field is not yet populated by the k8s
+// SA-token controller it returns ("", nil) so the caller can requeue
+// instead of blocking.
 //
 // TokenRequest would be cleaner but requires kcp to support
 // subresource PermissionClaims — see RFC 012. Until a tagged kcp
