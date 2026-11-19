@@ -79,10 +79,6 @@ spec:
                 description: |-
                   accessTokenSecretRef references a Secret in the same namespace as
                   the AccessGrant containing the full pma1.<...> access token string.
-                  The Secret is created by the provider reconciler, propagating the
-                  token from the ProviderAccessRequest's Secret. access-operator
-                  derives the per-dial HMAC call credential from the token value.
-                  A fresh PAR overwrites the Secret contents to drive re-onboarding.
                 properties:
                   key:
                     default: accessToken
@@ -97,23 +93,19 @@ spec:
                 - name
                 type: object
               accessURL:
-                description: |-
-                  accessURL is the user-side access SDK's /access endpoint, extracted
-                  from the access token's wire form by the provider reconciler.
+                description: accessURL is the user-side access SDK's /access endpoint.
                 type: string
               caBundle:
                 description: |-
                   caBundle is an optional PEM-encoded CA bundle used to verify the
-                  access SDK's /access TLS server certificate. Propagated from
-                  Provider.spec.remote.caBundle. When empty, access-operator uses
-                  system CAs.
+                  access SDK's /access TLS server certificate. When empty, system
+                  CAs are used.
                 type: string
               saRef:
                 description: |-
                   saRef references the ServiceAccount, in the same namespace as this
-                  AccessGrant, that access-operator ensures an SA-token Secret for
-                  and reads the bearer token from. The token is delivered to the
-                  user-side cluster in the /access request body.
+                  AccessGrant. The JWT token for this ServiceAccount is delivered to
+                  the user-side cluster in the /access request body.
                 properties:
                   name:
                     default: ""
